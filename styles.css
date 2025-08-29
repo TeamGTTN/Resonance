@@ -133,3 +133,22 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 12px;
 }
+
+/* Ribbon states */
+.workspace-ribbon .resonance-ribbon.recording {
+  color: #e03131 !important;
+}
+.workspace-ribbon .resonance-ribbon.processing {
+  color: var(--interactive-accent) !important;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* Status bar */
+.status-bar-item.resonance-statusbar {
+  color: var(--text-normal);
+}

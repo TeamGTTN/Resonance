@@ -198,7 +198,8 @@ export class RecordingModal extends Modal {
       throw new Error("Nessun dispositivo di input FFmpeg configurato. Imposta almeno il microfono.");
     }
 
-    const mixArgs = inputs.length === 4
+    const shouldMix = Boolean(micSpec && systemSpec);
+    const mixArgs = shouldMix
       ? ["-filter_complex", "[0:a][1:a]amix=inputs=2:duration=longest"]
       : [];
 
@@ -247,8 +248,8 @@ export class RecordingModal extends Modal {
     const sys = (this.settings.ffmpegSystemDevice || "").trim();
 
     if (format === "avfoundation") {
-      // macOS: device es. '0:' (mic) e ':1' (system). Usa direttamente il valore impostato.
-      return { format, micSpec: mic || "0:", systemSpec: sys || "" };
+      // macOS: audio-only -> ":index" (non "index:")
+      return { format, micSpec: mic || ":0", systemSpec: sys || "" };
     }
     if (format === "dshow") {
       // Windows: serve 'audio=Nome Dispositivo'
