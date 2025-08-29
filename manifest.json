@@ -1,0 +1,10 @@
+{
+  "id": "resonance",
+  "name": "Resonance",
+  "version": "1.0.0",
+  "minAppVersion": "1.5.0",
+  "description": "Registra riunioni, trascrive localmente con whisper.cpp, riassume con Gemini e crea note in Obsidian.",
+  "author": "Michael Gorini",
+  "authorUrl": "",
+  "isDesktopOnly": true
+}

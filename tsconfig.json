@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2020", "DOM"],
+    "allowJs": false,
+    "strict": true,
+    "noEmit": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {}
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules", "main.js", "main.js.map"]
+}
