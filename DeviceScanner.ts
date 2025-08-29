@@ -1,15 +1,15 @@
-// DeviceScanner: utility per interrogare FFmpeg e ricavare i nomi dei dispositivi
-// Funziona invocando ffmpeg con i parametri di list dei dispositivi per i backend supportati.
+// DeviceScanner: utility to query FFmpeg and extract device names.
+// It invokes ffmpeg with device-list arguments for supported backends.
 
 export interface ListedDevice {
   backend: string; // dshow | avfoundation | pulse | alsa
   type: 'audio' | 'video' | 'unknown';
-  name: string; // stringa da usare come spec ffmpeg (es. audio=Microphone (...) per dshow; :0 per avfoundation audio)
-  label: string; // etichetta leggibile
+  name: string; // string to use as ffmpeg spec (e.g., audio=Microphone (...) for dshow; :0 for avfoundation audio)
+  label: string; // human-readable label
 }
 
 export async function scanDevices(ffmpegPath: string, backend: 'dshow' | 'avfoundation' | 'pulse' | 'alsa'): Promise<ListedDevice[]> {
-  if (!ffmpegPath) throw new Error('Percorso FFmpeg non configurato');
+  if (!ffmpegPath) throw new Error('FFmpeg path not configured');
   const { spawn } = (window as any).require('child_process');
 
   const args = backend === 'dshow'

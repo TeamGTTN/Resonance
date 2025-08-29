@@ -15,11 +15,13 @@ export class RecorderService {
 
   private ffmpegChild: any | null = null;
   private stopRecordingFn: (() => Promise<void>) | null = null;
+  private explicitStopRequested: boolean = false;
 
   private audioDir: string = "";
   private audioPath: string = "";
   private transcriptPath: string = "";
   private logPath: string = "";
+  private selectedPresetKey: string | null = null;
 
   onPhaseChange?: (phase: RecorderPhase) => void;
   onElapsed?: (seconds: number) => void;
@@ -71,9 +73,16 @@ export class RecorderService {
     }
   }
 
+  async startWithPreset(presetKey: string) {
+    this.selectedPresetKey = presetKey;
+    await this.start();
+  }
+
   async stop() {
     if (this.phase !== "recording") return;
     try {
+      // Segnala che stiamo fermando intenzionalmente FFmpeg
+      this.explicitStopRequested = true;
       if (this.stopRecordingFn) await this.stopRecordingFn();
       this.stopRecordingFn = null;
       this.stopElapsedTimer();
@@ -81,9 +90,10 @@ export class RecorderService {
       try {
         const fs = (window as any).require("fs");
         const stat = fs.statSync(this.audioPath);
-        this.appendLog(`Registrazione terminata. File: ${this.audioPath} (${stat.size} bytes)`);
-      } catch { this.appendLog(`Registrazione terminata. File: ${this.audioPath}`); }
-      this.onInfo?.(`File audio salvato in: ${this.audioPath}`);
+        this.appendLog(`Recording finished. File: ${this.audioPath} (${stat.size} bytes)`);
+      } catch { this.appendLog(`Recording finished. File: ${this.audioPath}`); }
+      this.onInfo?.(`Transcribing...`);
+      await this.enforceRetention();
       await this.transcribe();
     } catch (e: any) {
       const msg = String(e?.message ?? e);
@@ -97,10 +107,10 @@ export class RecorderService {
     const path = (window as any).require("path");
     const fs = (window as any).require("fs");
 
-    // Determina la cartella del plugin nel vault: <vault>/.obsidian/plugins/<pluginId>/recordings
+    // Determine plugin folder inside the vault: <vault>/.obsidian/plugins/<pluginId>/recordings
     const adapter = (this.app.vault as any).adapter;
     const basePath: string = adapter?.getBasePath?.() ?? adapter?.basePath ?? "";
-    if (!basePath) throw new Error("Impossibile determinare il percorso del vault (solo Desktop)");
+    if (!basePath) throw new Error("Unable to determine vault base path (Desktop only)");
     const configDir: string = (this.app.vault as any).configDir ?? ".obsidian";
     const pluginDir = path.join(basePath, configDir, "plugins", this.pluginId);
     const recDir = path.join(pluginDir, "recordings");
@@ -109,7 +119,7 @@ export class RecorderService {
     try { if (!fs.existsSync(recDir)) fs.mkdirSync(recDir, { recursive: true }); } catch {}
 
     const stamp = new Date();
-    const name = `registrazione_${
+    const name = `recording_${
       stamp.getFullYear()
     }-${String(stamp.getMonth() + 1).padStart(2, "0")}-${String(stamp.getDate()).padStart(2, "0")}_${String(stamp.getHours()).padStart(2, "0")}-${String(stamp.getMinutes()).padStart(2, "0")}-${String(stamp.getSeconds()).padStart(2, "0")}.mp3`;
     this.audioDir = recDir;
@@ -121,6 +131,36 @@ export class RecorderService {
     try { fs.appendFileSync(this.logPath, `[${new Date().toISOString()}] Sessione iniziata\n`); } catch {}
   }
 
+  private async enforceRetention() {
+    try {
+      const max = Number(this.settings.maxRecordingsKept || 0);
+      if (!isFinite(max) || max <= 0) return; // 0 or invalid = infinite
+      const fs = (window as any).require("fs");
+      const path = (window as any).require("path");
+      const dir = this.audioDir;
+      if (!dir || !fs.existsSync(dir)) return;
+      const files: string[] = fs.readdirSync(dir) ?? [];
+      const mp3s = files.filter(f => /\.mp3$/i.test(f));
+      const entries = mp3s.map(f => {
+        const p = path.join(dir, f);
+        let stat: any; try { stat = fs.statSync(p); } catch { stat = { mtimeMs: 0 }; }
+        return { name: f, path: p, mtime: stat.mtimeMs || stat.ctimeMs || 0 };
+      }).sort((a,b)=> b.mtime - a.mtime);
+      if (entries.length <= max) return;
+      const toDelete = entries.slice(max);
+      for (const e of toDelete) {
+        try {
+          const base = e.name.replace(/\.mp3$/i, "");
+          const txt = path.join(dir, `${base}.txt`);
+          const log = path.join(dir, `${base}.log`);
+          try { fs.unlinkSync(e.path); } catch {}
+          try { fs.unlinkSync(txt); } catch {}
+          try { fs.unlinkSync(log); } catch {}
+        } catch {}
+      }
+    } catch {}
+  }
+
   private resolveFfmpegInput(): { format: string; micSpec?: string; systemSpec?: string } {
     const platform = process.platform;
     let format = this.settings.ffmpegInputFormat;
@@ -129,7 +169,7 @@ export class RecorderService {
     }
     const mic = (this.settings.ffmpegMicDevice || "").trim();
     const sys = (this.settings.ffmpegSystemDevice || "").trim();
-    // macOS: audio-only -> ":index" (non "index:")
+    // macOS: audio-only -> ":index" (not "index:")
     if (format === "avfoundation") return { format, micSpec: mic || ":0", systemSpec: sys || "" };
     if (format === "dshow") return { format, micSpec: mic || "audio=Microphone (default)", systemSpec: sys || "" };
     return { format, micSpec: mic || "default", systemSpec: sys || "" };
@@ -137,7 +177,7 @@ export class RecorderService {
 
   private async beginRecording() {
     const { ffmpegPath } = this.settings;
-    if (!ffmpegPath) throw new Error("Percorso FFmpeg non configurato");
+    if (!ffmpegPath) throw new Error("FFmpeg path not configured");
 
     const { spawn } = (window as any).require("child_process");
 
@@ -145,7 +185,7 @@ export class RecorderService {
     const inputs: string[] = [];
     if (micSpec) inputs.push("-f", format, "-i", micSpec);
     if (systemSpec) inputs.push("-f", format, "-i", systemSpec);
-    if (inputs.length === 0) throw new Error("Nessun dispositivo di input FFmpeg configurato. Imposta almeno il microfono.");
+    if (inputs.length === 0) throw new Error("No FFmpeg input device configured. Set at least the microphone.");
 
     const shouldMix = Boolean(micSpec && systemSpec);
     const mixArgs = shouldMix ? ["-filter_complex", "[0:a][1:a]amix=inputs=2:duration=longest"] : [];
@@ -156,18 +196,27 @@ export class RecorderService {
 
     const args = ["-y", ...inputs, ...mixArgs, ...outputArgs];
     this.ffmpegChild = spawn(ffmpegPath, args, { detached: false });
-    this.appendLog(`FFmpeg avviato: ${ffmpegPath} ${args.join(" ")}`);
+    this.appendLog(`FFmpeg started: ${ffmpegPath} ${args.join(" ")}`);
 
-    // Se FFmpeg termina subito con errore, notifichiamo
+    // Collect stderr to surface meaningful tail on errors
     let ffErr = "";
     this.ffmpegChild.stderr?.on("data", (d: Buffer) => { ffErr += d.toString(); });
-    this.ffmpegChild.on("close", (code: number) => {
-      if (this.phase === "recording" && code !== 0) {
+    this.ffmpegChild.on("close", (code: number | null, signal: NodeJS.Signals | null) => {
+      const signaled = Boolean(signal);
+      const userStop = this.explicitStopRequested || signal === "SIGINT" || signal === "SIGTERM" || signal === "SIGKILL";
+
+      if (userStop) {
+        this.appendLog(`FFmpeg terminated on request (code=${code ?? 0}, signal=${signal ?? "none"}).`);
+        // Do not treat as error; stop() flow will continue
+      } else if (this.phase === "recording" && (code ?? 0) !== 0) {
         const tail = ffErr.split(/\r?\n/).slice(-8).join("\n");
-        this.onError?.(`FFmpeg terminato con codice ${code}.\n${tail}`);
-        this.appendLog(`FFmpeg errore (${code}):\n${tail}`);
+        this.onError?.(`FFmpeg exited with code ${code}.\n${tail}`);
+        this.appendLog(`FFmpeg error (${code}):\n${tail}`);
         this.setPhase("error");
       }
+
+      this.explicitStopRequested = false;
+      this.ffmpegChild = null;
     });
 
     this.stopRecordingFn = async () => {
@@ -198,8 +247,8 @@ export class RecorderService {
   private async transcribe() {
     this.setPhase("transcribing");
     const { whisperMainPath, whisperModelPath, whisperLanguage } = this.settings;
-    if (!whisperMainPath) throw new Error("Percorso whisper-cli non configurato");
-    if (!whisperModelPath) throw new Error("Percorso modello Whisper non configurato");
+    if (!whisperMainPath) throw new Error("whisper-cli path not configured");
+    if (!whisperModelPath) throw new Error("Whisper model path not configured");
 
     const { spawn } = (window as any).require("child_process");
     const fs = (window as any).require("fs");
@@ -207,7 +256,7 @@ export class RecorderService {
     const args = ["-m", whisperModelPath, "-f", this.audioPath];
     const lang = (whisperLanguage || "auto").trim();
     if (lang && lang !== "auto") { args.push("-l", lang); }
-    this.appendLog(`Trascrizione: ${whisperMainPath} ${args.join(" ")}`);
+    this.appendLog(`Transcription: ${whisperMainPath} ${args.join(" ")}`);
 
     const stdoutBuf: string[] = [];
     let stderrBuf = "";
@@ -218,14 +267,14 @@ export class RecorderService {
       child.stderr?.on("data", (d: Buffer) => { stderrBuf += d.toString(); });
       child.on("error", (err: any) => reject(err));
       child.on("close", (code: number) => {
-        if (code === 0) resolve(); else reject(new Error(`whisper-cli uscita con codice ${code}: ${stderrBuf}`));
+        if (code === 0) resolve(); else reject(new Error(`whisper-cli exited with code ${code}: ${stderrBuf}`));
       });
     });
 
     const transcript = stdoutBuf.join("").trim();
-    if (!transcript) throw new Error("Trascrizione vuota o non trovata");
-    try { fs.writeFileSync(this.transcriptPath, transcript, { encoding: "utf8" }); this.appendLog(`Trascrizione salvata: ${this.transcriptPath} (${transcript.length} chars)`); } catch {}
-    this.onInfo?.(`Trascrizione salvata: ${this.transcriptPath}`);
+    if (!transcript) throw new Error("Empty transcription");
+    try { fs.writeFileSync(this.transcriptPath, transcript, { encoding: "utf8" }); this.appendLog(`Transcription saved: ${this.transcriptPath} (${transcript.length} chars)`); } catch {}
+    this.onInfo?.(`Summarizing...`);
 
     await this.summarize(transcript);
   }
@@ -233,20 +282,11 @@ export class RecorderService {
   private async summarize(transcript: string) {
     this.setPhase("summarizing");
     const { geminiApiKey, geminiModel } = this.settings;
-    if (!geminiApiKey) throw new Error("API Key Gemini non configurata");
+    if (!geminiApiKey) throw new Error("Gemini API Key not configured");
 
-    const prompt = `Sei un assistente AI d'élite, specializzato nell'estrarre l'essenza da dialoghi professionali. Analizza la seguente trascrizione di una riunione e distilla le informazioni in un report conciso e strutturato in formato Markdown. Il tuo output deve essere immediatamente utilizzabile.
-
-## Punti Salienti
-- Un elenco puntato che cattura le conclusioni, le intuizioni e i temi principali emersi dalla discussione.
-
-## Decisioni Formalizzate
-- Un elenco chiaro e diretto delle decisioni approvate. Se non ci sono decisioni esplicite, scrivi 'Nessuna decisione formale presa'.
-
-## Piano d'Azione
-- Una checklist di task da completare, formattata come: - [ ] Descrizione chiara del task @Proprietario (se identificabile)
-
-Se una sezione risulta vuota, omettila elegantemente dal report finale. Concentrati sulla chiarezza e la sintesi.`;
+    const { PROMPT_PRESETS, DEFAULT_PROMPT_KEY } = await import('./prompts');
+    const preset = PROMPT_PRESETS[this.selectedPresetKey || this.settings.lastPromptKey || DEFAULT_PROMPT_KEY] || PROMPT_PRESETS[DEFAULT_PROMPT_KEY];
+    const prompt = preset.prompt;
 
     const model = (geminiModel || "gemini-1.5-pro").trim();
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
@@ -271,24 +311,24 @@ Se una sezione risulta vuota, omettila elegantemente dal report finale. Concentr
 
     if (!res.ok) {
       const errTxt = await res.text().catch(() => "");
-      throw new Error(`Errore API Gemini: ${res.status} ${errTxt}`);
+      throw new Error(`Gemini API error: ${res.status} ${errTxt}`);
     }
 
     const json = await res.json();
     const summary = extractMarkdownFromGemini(json) || "";
-    if (!summary) throw new Error("Riassunto vuoto dalla risposta di Gemini");
-    this.appendLog(`Riassunto generato (${summary.length} chars)`);
+    if (!summary) throw new Error("Empty summary from Gemini");
+    this.appendLog(`Summary generated (${summary.length} chars)`);
 
     await this.createNote(summary);
   }
 
   private async createNote(markdown: string) {
-    const fileName = `Riunione ${window.moment().format("YYYY-MM-DD HH-mm")}.md`;
+    const fileName = `Meeting ${window.moment().format("YYYY-MM-DD HH-mm")}.md`;
     const folder = this.settings.outputFolder?.trim();
     const fullPath = folder ? `${folder}/${fileName}` : fileName;
     const tfile = await this.app.vault.create(fullPath, markdown);
-    new Notice("Nota creata!");
-    this.appendLog(`Nota creata: ${fullPath}`);
+    new Notice("Note created!");
+    this.appendLog(`Note created: ${fullPath}`);
 
     this.setPhase("done");
     const leaf = this.app.workspace.getLeaf(true);

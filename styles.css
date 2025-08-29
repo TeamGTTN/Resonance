@@ -1,6 +1,53 @@
 .resonance-modal {
   padding: 12px 16px;
 }
+.modal-container .resonance-wide .modal {
+  width: 900px;
+  max-width: 92vw;
+}
+.resonance-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 6px 0 10px 0;
+}
+
+.resonance-toolbar .date { flex: 0 1 auto; }
+.resonance-toolbar .search { flex: 1 1 220px; }
+
+.resonance-toolbar input[type="text"],
+.resonance-toolbar select {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+}
+
+.resonance-toolbar .spacer { flex: 1 1 auto; }
+
+.resonance-list { display: flex; flex-direction: column; gap: 8px; }
+
+.resonance-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+}
+
+.resonance-meta { display: flex; align-items: center; gap: 10px; }
+.resonance-left { display: flex; align-items: center; gap: 10px; }
+.resonance-title { font-weight: 600; }
+.resonance-sub { color: var(--text-muted); font-size: 12px; }
+.resonance-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.resonance-audio-wrap { margin: 6px 0 12px 28px; }
 
 .resonance-modal h2 {
   margin-top: 4px;
@@ -113,7 +160,8 @@
 
 /* Select inline nelle impostazioni */
 .resonance-inline-select {
-  margin-left: 8px;
+  margin-left: 0px;
+  margin-bottom: 10px;
   padding: 6px 8px;
   border-radius: 6px;
   border: 1px solid var(--background-modifier-border);
@@ -128,11 +176,13 @@
   border-radius: 8px;
   padding: 8px 10px;
   overflow: auto;
+  position: relative;
 }
 .resonance-help code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 12px;
 }
+.resonance-btn.small { padding: 4px 8px; font-size: 12px; border-radius: 6px; }
 
 /* Ribbon states */
 .workspace-ribbon .resonance-ribbon.recording {

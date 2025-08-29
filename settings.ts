@@ -1,6 +1,7 @@
 import { App, PluginSettingTab, Setting, Notice } from "obsidian";
 import { scanDevices, ListedDevice } from "./DeviceScanner";
 import { HelpModal } from "./HelpModal";
+import { LibraryModal } from "./LibraryModal";
 
 export interface ResonanceSettings {
   geminiApiKey: string;
@@ -9,12 +10,14 @@ export interface ResonanceSettings {
   ffmpegInputFormat: "auto" | "avfoundation" | "dshow" | "pulse" | "alsa";
   ffmpegMicDevice: string;
   ffmpegSystemDevice: string;
-  whisperRepoPath: string; // nuovo: path root repo whisper.cpp
-  whisperMainPath: string; // whisper-cli risolto automaticamente dal repo
+  whisperRepoPath: string; // repo root path for whisper.cpp
+  whisperMainPath: string; // whisper-cli resolved automatically from repo
   whisperModelPath: string;
-  whisperModelPreset: "small" | "medium" | "large"; // scelte rapide
-  whisperLanguage: string; // iso code or 'auto'
+  whisperModelPreset: "small" | "medium" | "large"; // quick choices
+  whisperLanguage: string; // ISO code or 'auto'
   outputFolder: string;
+  lastPromptKey?: string;
+  maxRecordingsKept: number; // 0 = infinite
 }
 
 export const DEFAULT_SETTINGS: ResonanceSettings = {
@@ -30,96 +33,123 @@ export const DEFAULT_SETTINGS: ResonanceSettings = {
   whisperModelPreset: "medium",
   whisperLanguage: "auto",
   outputFolder: "",
+  lastPromptKey: undefined,
+  maxRecordingsKept: 20,
 };
 
 export class ResonanceSettingTab extends PluginSettingTab {
   private settings: ResonanceSettings;
   private save: (settings: Partial<ResonanceSettings>) => Promise<void>;
   private lastScan: ListedDevice[] = [];
+  private pluginId: string;
 
   constructor(app: App, settings: ResonanceSettings, save: (settings: Partial<ResonanceSettings>) => Promise<void>) {
     super(app, (app as any).plugins.getPlugin("resonance"));
     this.settings = settings;
     this.save = save;
+    this.pluginId = ((app as any).plugins.getPlugin("resonance")?.manifest?.id) || "resonance";
   }
 
   async display() {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl("h2", { text: "Resonance – Impostazioni" });
+    containerEl.createEl("h3", { text: "Resonance" });
+
+    containerEl.createEl("p", { 
+      text: "Thanks for using Resonance :)"
+    });
+    containerEl.createEl("p", { 
+      text: "I know, setup can be a bit of a hassle... but once you’re done, you’ll be recording and transcribing like a pro! Take a few minutes to complete all the steps,future you will thank you."
+    });
+    
+    containerEl.createEl("p", {
+      text: "After you've completed the setup, use the microphone icon in the ribbon to start/stop, select a scenario from the menu that appears, and watch the timer in the status bar. "
+    });
+
+    containerEl.createEl("p", {
+      text: "When finished, a note will be created in the Notes folder you've selected. You can also open the Library (audio file icon) to listen, copy the transcription, or manage recordings."
+    });
 
     // STEP 1: FFmpeg
-    containerEl.createEl("h3", { text: "1) FFmpeg" });
-    containerEl.createEl("p", { text: "FFmpeg è l'utility che useremo per registrare l'audio. Installazione consigliata: macOS con Homebrew (brew install ffmpeg); Windows scarica la build statica da ffmpeg.org e punta a ffmpeg.exe; Linux usa il gestore pacchetti (apt/yum/pacman)." });
+    containerEl.createEl("h3", { text: "FFmpeg" });
+    containerEl.createEl("p", { text: "Used to capture audio from your microphone and system audio." });
+
+    new Setting(containerEl)
+    .setName("Installation")
+    .setDesc("Install on macOS via Homebrew, Windows static build, or Linux via package manager.")
+    .addButton((btn)=> btn.setButtonText("Guide").onClick(()=> new HelpModal(this.app, 'ffmpeg').open()));
 
     const ffmpegSetting = new Setting(containerEl)
-      .setName("Percorso FFmpeg")
-      .setDesc("Scegli il percorso all'eseguibile ffmpeg e verifica con Rileva.")
+      .setName("FFmpeg path")
+      .setDesc("Choose the ffmpeg executable or use Detect to auto‑find.")
       .addText(text =>
         text
-          .setPlaceholder("/opt/homebrew/bin/ffmpeg o C:/ffmpeg/bin/ffmpeg.exe")
+          .setPlaceholder("/opt/homebrew/bin/ffmpeg or C:/ffmpeg/bin/ffmpeg.exe")
           .setValue(this.settings.ffmpegPath)
           .onChange(async (value) => { await this.save({ ffmpegPath: value.trim() }); })
       );
-    ffmpegSetting.addButton((btn) => btn.setButtonText("Rileva").onClick(async () => {
+    ffmpegSetting.addButton((btn) => btn.setButtonText("Detect").onClick(async () => {
       const guess = await this.autoDetectFfmpeg();
-      if (guess) { await this.save({ ffmpegPath: guess }); new Notice('FFmpeg rilevato'); this.display(); }
-      else new Notice('Nessun FFmpeg rilevato');
+      if (guess) { await this.save({ ffmpegPath: guess }); new Notice('FFmpeg detected'); this.display(); }
+      else new Notice('No FFmpeg found');
     }));
-    ffmpegSetting.addButton((btn)=> btn.setButtonText("Guida").onClick(()=> new HelpModal(this.app, 'ffmpeg').open()));
 
     // STEP 2: Whisper
-    containerEl.createEl("h3", { text: "2) Whisper (trascrizione locale)" });
-    containerEl.createEl("p", { text: "Indica la cartella del repository whisper.cpp. Troveremo automaticamente l'eseguibile whisper-cli. Poi scegli un modello (small/medium/large) e scarichiamolo nella cartella models/ del repo." });
+    containerEl.createEl("h3", { text: "Whisper" });
+    containerEl.createEl("p", { text: "Used to transcribe audio locally." });
 
-    const repoSetting = new Setting(containerEl)
-      .setName("Percorso repo whisper.cpp")
-      .setDesc("Cartella root del repo (es: /path/whisper.cpp)")
+    new Setting(containerEl)
+    .setName("Installation")
+    .setDesc("Manual installation required.")
+    .addButton((btn)=> btn.setButtonText("Guide").onClick(()=> new HelpModal(this.app, 'whisper').open()));
+
+    new Setting(containerEl)
+      .setName("whisper.cpp repo path")
+      .setDesc("Repo root folder (e.g., /path/whisper.cpp)")
       .addText(text =>
         text
           .setPlaceholder(process.platform === 'win32' ? 'C:/whisper.cpp' : '/path/whisper.cpp')
           .setValue(this.settings.whisperRepoPath || '')
           .onChange(async (value) => { await this.save({ whisperRepoPath: value.trim() }); })
       );
-    repoSetting.addButton((btn)=> btn.setButtonText("Guida").onClick(()=> new HelpModal(this.app, 'whisper').open()));
 
     const whisperSetting = new Setting(containerEl)
-      .setName("Eseguibile whisper-cli")
-      .setDesc("Risolto automaticamente dalla cartella repo; puoi modificarlo se necessario.")
+      .setName("whisper-cli executable")
+      .setDesc("Auto‑resolved from repo; you can override it.")
       .addText(text =>
         text
           .setPlaceholder(process.platform === 'win32' ? 'C:/whisper/build/bin/whisper-cli.exe' : '/path/whisper.cpp/build/bin/whisper-cli')
           .setValue(this.settings.whisperMainPath)
           .onChange(async (value) => { await this.save({ whisperMainPath: value.trim() }); })
       );
-    whisperSetting.addButton((btn)=> btn.setButtonText("Trova dal repo").onClick(async ()=>{
+    whisperSetting.addButton((btn)=> btn.setButtonText("Find from repo").onClick(async ()=>{
       const cli = await this.findWhisperCliFromRepo(this.settings.whisperRepoPath);
-      if (cli) { await this.save({ whisperMainPath: cli }); new Notice('whisper-cli trovato'); this.display(); }
-      else new Notice('whisper-cli non trovato. Compila il repo (cmake/make).');
+      if (cli) { await this.save({ whisperMainPath: cli }); new Notice('whisper-cli found'); this.display(); }
+      else new Notice('whisper-cli not found. Build the repo (cmake/make).');
     }));
 
     const modelPreset = new Setting(containerEl)
-      .setName("Modello (preset)")
-      .setDesc("Scegli la dimensione del modello. Verrà scaricato in whisper.cpp/models se non presente.")
+      .setName("Model")
+      .setDesc("Choose the model size. It will be downloaded automatically if missing.")
       .addDropdown(drop => {
-        drop.addOption('small','small (veloce)');
-        drop.addOption('medium','medium (bilanciato)');
-        drop.addOption('large','large (qualità)');
+        drop.addOption('small','small (fast)');
+        drop.addOption('medium','medium (balanced)');
+        drop.addOption('large','large (quality)');
         drop.setValue(this.settings.whisperModelPreset || 'medium');
         drop.onChange(async (value)=> { await this.save({ whisperModelPreset: value as any }); });
       });
-    modelPreset.addButton((btn)=> btn.setButtonText("Scarica modello").onClick(async ()=>{
+    modelPreset.addButton((btn)=> btn.setButtonText("Download model").onClick(async ()=>{
       try {
         const file = await this.downloadModelPreset();
-        if (file) { await this.save({ whisperModelPath: file }); new Notice('Modello pronto: ' + file); this.display(); }
-        else new Notice('Download modello non riuscito');
-      } catch (e: any) { new Notice('Errore download: ' + (e?.message ?? e)); }
+        if (file) { await this.save({ whisperModelPath: file }); new Notice('Model ready: ' + file); this.display(); }
+        else new Notice('Model download failed');
+      } catch (e: any) { new Notice('Download error: ' + (e?.message ?? e)); }
     }));
 
     new Setting(containerEl)
-      .setName("Modello Whisper (.bin)")
-      .setDesc("Percorso completo del modello. Se hai usato 'Scarica modello' è gia impostato.")
+      .setName("Whisper model (.bin)")
+      .setDesc("Full path to the model.")
       .addText(text =>
         text
           .setPlaceholder(process.platform === 'win32' ? 'C:/whisper/models/ggml-medium.bin' : '/path/whisper.cpp/models/ggml-medium.bin')
@@ -128,11 +158,11 @@ export class ResonanceSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Lingua trascrizione")
-      .setDesc("Scegli la lingua attesa nella registrazione oppure lascia Automatico.")
+      .setName("Transcription language")
+      .setDesc("Choose expected language or leave Automatic.")
       .addDropdown(drop => {
         const opts: [string, string][] = [
-          ['auto','Automatico'],
+          ['auto','Automatic'],
           ['it','Italiano'],
           ['en','English'],
           ['es','Español'],
@@ -146,12 +176,17 @@ export class ResonanceSettingTab extends PluginSettingTab {
       });
 
     // STEP 3: LLM (Gemini)
-    containerEl.createEl("h3", { text: "3) LLM (riassunto)" });
-    containerEl.createEl("p", { text: "Per generare il riassunto usiamo l'API di Google Gemini. Crea una API Key nella console Google AI Studio e incollala qui. Puoi scegliere il modello da usare." });
+    containerEl.createEl("h3", { text: "LLM" });
+    containerEl.createEl("p", { text: "Used to summarize the transcription." });
 
+    new Setting(containerEl)
+    .setName("Installation")
+    .setDesc("Use your own API key.")
+    .addButton((btn)=> btn.setButtonText("Guide").onClick(()=> new HelpModal(this.app, 'llm').open()));
+    
     const apiSetting = new Setting(containerEl)
       .setName("Google Gemini API Key")
-      .setDesc("La chiave resta memorizzata localmente nel vault.")
+      .setDesc("Key is stored locally in your vault.")
       .addText(text =>
         text
           .setPlaceholder("gai-...")
@@ -159,31 +194,32 @@ export class ResonanceSettingTab extends PluginSettingTab {
           .onChange(async (value) => { await this.save({ geminiApiKey: value }); })
       );
     apiSetting.settingEl.querySelector("input")?.setAttribute("type", "password");
-    apiSetting.addButton((btn)=> btn.setButtonText("Guida").onClick(()=> new HelpModal(this.app, 'llm').open()));
 
     new Setting(containerEl)
-      .setName("Modello Gemini")
-      .setDesc("Scegli il modello: flash (più veloce), pro (migliore qualità), exp (sperimentale).")
+      .setName("Gemini model")
+      .setDesc("Available: 1.5‑pro, 2.5‑flash, 2.5‑pro.")
       .addDropdown(drop => {
-        const options: Record<string, string> = {
-          "gemini-1.5-flash": "gemini-1.5-flash",
+        const allowed: string[] = ["gemini-1.5-pro", "gemini-2.5-flash", "gemini-2.5-pro"];
+        const labels: Record<string, string> = {
           "gemini-1.5-pro": "gemini-1.5-pro",
-          "gemini-1.5-pro-exp": "gemini-1.5-pro-exp",
+          "gemini-2.5-flash": "gemini-2.5-flash",
+          "gemini-2.5-pro": "gemini-2.5-pro",
         };
-        Object.entries(options).forEach(([value, label]) => drop.addOption(value, label));
-        drop.setValue(this.settings.geminiModel || "gemini-1.5-pro");
+        allowed.forEach(k => drop.addOption(k, labels[k]));
+        const current = allowed.includes(this.settings.geminiModel) ? this.settings.geminiModel : "gemini-2.5-pro";
+        drop.setValue(current);
         drop.onChange(async (value) => { await this.save({ geminiModel: value }); });
       });
 
-    // STEP 4: Dispositivi audio
-    containerEl.createEl("h3", { text: "4) Dispositivi audio" });
-    containerEl.createEl("p", { text: "Seleziona il backend e scegli i dispositivi dall'elenco. Usa Scansiona per popolare automaticamente. Non è necessario scrivere nulla a mano." });
+    // STEP 4: Audio devices
+    containerEl.createEl("h3", { text: "Audio devices" });
+    containerEl.createEl("p", { text: "Select backend and choose devices." });
 
-    const backendSetting = new Setting(containerEl)
-      .setName("Backend FFmpeg")
-      .setDesc("Automatico prova a scegliere in base al sistema. In caso di problemi seleziona manualmente.")
+    new Setting(containerEl)
+      .setName("FFmpeg backend")
+      .setDesc("Automatic picks based on OS, choose manually if needed.")
       .addDropdown(drop => {
-        drop.addOption("auto", "Automatico");
+        drop.addOption("auto", "Automatic");
         drop.addOption("avfoundation", "avfoundation (macOS)");
         drop.addOption("dshow", "dshow (Windows)");
         drop.addOption("pulse", "pulse (Linux)");
@@ -191,36 +227,57 @@ export class ResonanceSettingTab extends PluginSettingTab {
         drop.setValue(this.settings.ffmpegInputFormat || "auto");
         drop.onChange(async (value) => { await this.save({ ffmpegInputFormat: value as ResonanceSettings["ffmpegInputFormat"] }); });
       });
-    backendSetting.addButton((btn)=> btn.setButtonText("Guida").onClick(()=> new HelpModal(this.app, 'devices').open()));
 
-    const micSetting = new Setting(containerEl).setName("Microfono").setDesc("Scegli dall'elenco dopo la scansione.");
+    const micSetting = new Setting(containerEl).setName("Microphone").setDesc("Choose from the list after scanning.");
     const micSelect = micSetting.settingEl.createEl("select");
     micSelect.addClass("resonance-inline-select");
 
-    const sysSetting = new Setting(containerEl).setName("Audio di sistema (opzionale)").setDesc("Scegli dall'elenco dopo la scansione. Se non disponibile lascia vuoto.");
+    const sysSetting = new Setting(containerEl).setName("System audio").setDesc("Choose after scanning. Leave empty if not available.");
     const sysSelect = sysSetting.settingEl.createEl("select");
     sysSelect.addClass("resonance-inline-select");
-    const none = document.createElement('option'); none.value=''; none.text='(nessuno)'; sysSelect.appendChild(none);
+    const none = document.createElement('option'); none.value=''; none.text='(none)'; sysSelect.appendChild(none);
 
     new Setting(containerEl)
-      .setName("Strumenti dispositivi")
-      .setDesc("Scansiona e poi seleziona i dispositivi.")
-      .addButton((btn) => btn.setButtonText("Scansiona").onClick(async () => { await this.performScanAndPopulate(micSelect, sysSelect); }))
-      .addButton((btn) => btn.setButtonText("Test rapido 3s").onClick(async () => { await this.quickTestRecording(); }));
+      .setName("Device tools")
+      .setDesc("Refresh devices and test audio config.")
+      .addButton((btn) => btn.setButtonText("Refresh devices").onClick(async () => { await this.performScanAndPopulate(micSelect, sysSelect); }))
+      .addButton((btn) => btn.setButtonText("Test audio config").onClick(async () => { await this.quickTestRecording(); }));
 
     await this.performScanAndPopulate(micSelect, sysSelect).catch(()=>{});
     micSelect.addEventListener('change', async () => { await this.save({ ffmpegMicDevice: micSelect.value }); });
     sysSelect.addEventListener('change', async () => { await this.save({ ffmpegSystemDevice: sysSelect.value }); });
 
     // STEP 5: Obsidian
-    containerEl.createEl("h3", { text: "5) Obsidian" });
-    containerEl.createEl("p", { text: "Scegli la cartella del tuo vault in cui salvare le note generate. Se lasci vuoto, verranno create nella root." });
+    containerEl.createEl("h3", { text: "Obsidian" });
+    containerEl.createEl("p", { text: "Choose the folder where generated notes will be saved." });
 
     const obs = new Setting(containerEl)
-      .setName("Cartella per le note")
-      .setDesc("Esempio: Meeting Notes")
+      .setName("Notes folder")
+      .setDesc("Example: Meeting Notes, if empty, root of the vault.")
       .addText(text => text.setPlaceholder("Meeting Notes").setValue(this.settings.outputFolder).onChange(async (value) => { await this.save({ outputFolder: value.trim() }); }));
-    obs.addButton((btn)=> btn.setButtonText("Guida").onClick(()=> new HelpModal(this.app, 'obsidian').open()));
+
+    // STEP 6: Library & retention
+    containerEl.createEl("h3", { text: "Library & retention" });
+    new Setting(containerEl)
+      .setName("Max recordings kept")
+      .setDesc("0 = infinite, older ones will be deleted automatically.")
+      .addText((text) =>
+        text
+          .setPlaceholder("5")
+          .setValue(String(this.settings.maxRecordingsKept ?? 5))
+          .onChange(async (value) => {
+            const v = Math.max(0, Math.floor(Number(value || 0)));
+            await this.save({ maxRecordingsKept: v });
+          })
+      );
+    new Setting(containerEl)
+      .setName("Open Library")
+      .setDesc("See recordings list and actions")
+      .addButton((btn)=> btn.setButtonText("Open").onClick(()=>{
+        try {
+          new LibraryModal(this.app, this.pluginId).open();
+        } catch (e: any) { new Notice(`Failed to open Library: ${e?.message ?? e}`); }
+      }));
   }
 
   private resolveBackend(): 'dshow' | 'avfoundation' | 'pulse' | 'alsa' {
@@ -250,7 +307,7 @@ export class ResonanceSettingTab extends PluginSettingTab {
     } else if (micSelect.options.length > 0) {
       micSelect.selectedIndex = 0;
       await this.save({ ffmpegMicDevice: micSelect.value });
-      new Notice(`Microfono impostato automaticamente su: ${micSelect.options[micSelect.selectedIndex].text}`);
+      new Notice(`Microphone auto-selected: ${micSelect.options[micSelect.selectedIndex].text}`);
     }
 
     const availableSysValues = new Set(Array.from(sysSelect.options).map(o => o.value));
@@ -338,7 +395,7 @@ export class ResonanceSettingTab extends PluginSettingTab {
 
     const repo = this.settings.whisperRepoPath?.trim();
     const modelsDir = repo ? path.join(repo, 'models') : (this.settings.whisperModelPath ? path.dirname(this.settings.whisperModelPath) : '');
-    if (!modelsDir) throw new Error('Imposta prima la cartella repo o un percorso modello');
+    if (!modelsDir) throw new Error('Set the repo folder first or provide a model path');
     try { fs.mkdirSync(modelsDir, { recursive: true }); } catch {}
 
     const outFile = path.join(modelsDir, url.split('/').pop());
@@ -361,10 +418,10 @@ export class ResonanceSettingTab extends PluginSettingTab {
 
   private async quickTestRecording() {
     const ffmpeg = this.settings.ffmpegPath.trim();
-    if (!ffmpeg) { new Notice('Imposta prima FFmpeg'); return; }
+    if (!ffmpeg) { new Notice('Set FFmpeg first'); return; }
     const backend = this.resolveBackend();
     const mic = this.settings.ffmpegMicDevice.trim();
-    if (!mic) { new Notice('Seleziona un microfono'); return; }
+    if (!mic) { new Notice('Select a microphone'); return; }
 
     const { spawn } = (window as any).require('child_process');
     const os = (window as any).require('os');
@@ -381,15 +438,15 @@ export class ResonanceSettingTab extends PluginSettingTab {
     child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
 
     child.on('close', (code: number) => {
-      if (code === 0) new Notice('Test completato: registrazione di 3s creata');
+      if (code === 0) new Notice('Test completed: 3s recording created');
       else {
         const hint = stderr.split(/\r?\n/).slice(-6).join('\n');
-        new Notice(`Test fallito (codice ${code}).\n${hint}`);
+        new Notice(`Test failed (code ${code}).\n${hint}`);
       }
       try { fs.unlinkSync(out); fs.rmdirSync(tmpDir); } catch {}
     });
     child.on('error', (e: any) => {
-      new Notice(`Errore test FFmpeg: ${e?.message ?? e}`);
+      new Notice(`FFmpeg test error: ${e?.message ?? e}`);
       try { fs.rmdirSync(tmpDir); } catch {}
     });
   }

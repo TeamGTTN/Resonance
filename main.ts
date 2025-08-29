@@ -1,8 +1,9 @@
 import { App, Modal, Notice, Plugin } from "obsidian";
 import { ResonanceSettings, DEFAULT_SETTINGS, ResonanceSettingTab } from "./settings";
 import { checkDependencies } from "./DependencyChecker";
-// @ts-expect-error: risoluzione modulo a runtime via bundler
+// @ts-expect-error: module is resolved at runtime by the bundler
 import { RecorderService, type RecorderPhase } from "./RecorderService";
+import { PROMPT_PRESETS, DEFAULT_PROMPT_KEY, getPresetKeys } from "./prompts";
 
 declare global {
   interface Window {
@@ -26,13 +27,35 @@ export default class ResonancePlugin extends Plugin {
       await this.saveSettings(partial);
     });
 
-    const ribbonIconEl = this.addRibbonIcon("mic", "Resonance: Registratore Riunione", async () => {
-      await this.toggleFromRibbon();
+    // Library icon first (so it appears above the microphone icon)
+    const libRibbon = this.addRibbonIcon("audio-file", "Resonance - Library", async () => {
+      const { LibraryModal } = await import('./LibraryModal');
+      new LibraryModal(this.app, this.manifest.id).open();
+    });
+    libRibbon.addClass("resonance-ribbon");
+    // Sposta in fondo (con flex column-reverse = primo figlio)
+    this.moveRibbonToBottom(libRibbon);
+    // Ripeti a layout pronto (altri plugin possono aggiungere icone dopo)
+    this.app.workspace.onLayoutReady(() => {
+      window.setTimeout(() => this.moveRibbonToBottom(libRibbon), 0);
+      window.setTimeout(() => this.moveRibbonToBottom(libRibbon), 500);
+    });
+
+    // Microphone icon below library icon
+    const ribbonIconEl = this.addRibbonIcon("mic", "Resonance - Meeting recorder", async () => {
+      await this.toggleFromRibbonWithPreset();
     });
     this.ribbonIconEl = ribbonIconEl;
     ribbonIconEl.addClass("resonance-ribbon");
+    // Sposta in fondo (con flex column-reverse = primo figlio)
+    this.moveRibbonToBottom(ribbonIconEl);
+    // Ripeti a layout pronto (altri plugin possono aggiungere icone dopo)
+    this.app.workspace.onLayoutReady(() => {
+      window.setTimeout(() => this.moveRibbonToBottom(ribbonIconEl), 0);
+      window.setTimeout(() => this.moveRibbonToBottom(ribbonIconEl), 500);
+    });
 
-    // Status bar per timer/stati
+    // Status bar for timer/status
     this.statusBarEl = this.addStatusBarItem();
     this.statusBarEl.addClass("resonance-statusbar");
     this.statusBarEl.setText("");
@@ -40,9 +63,18 @@ export default class ResonancePlugin extends Plugin {
 
     this.addCommand({
       id: "resonance-open-recorder",
-      name: "Avvia/ferma registrazione (Resonance)",
+      name: "Start/stop recording (Resonance)",
       callback: async () => {
-        await this.toggleFromRibbon();
+        await this.toggleFromRibbonWithPreset();
+      },
+    });
+
+    this.addCommand({
+      id: "resonance-open-library",
+      name: "Open Library",
+      callback: async () => {
+        const { LibraryModal } = await import('./LibraryModal');
+        new LibraryModal(this.app, this.manifest.id).open();
       },
     });
 
@@ -50,7 +82,7 @@ export default class ResonancePlugin extends Plugin {
       await this.saveSettings(partial);
     }));
 
-    // Collegamento eventi servizio → UI
+    // Wire up service events → UI
     this.recorder.onPhaseChange = (phase: RecorderPhase) => {
       this.updateRibbonState(phase);
       this.updateStatusBarState(phase);
@@ -59,7 +91,7 @@ export default class ResonancePlugin extends Plugin {
       this.updateStatusBarTimer(sec);
     };
     this.recorder.onError = (message: string) => {
-      new Notice(`Errore Resonance: ${message}`);
+      new Notice(`Resonance error: ${message}`);
     };
     this.recorder.onInfo = (message: string) => {
       new Notice(message);
@@ -77,24 +109,25 @@ export default class ResonancePlugin extends Plugin {
     });
 
     if (!deps.hasApiKey || !deps.ffmpegOk || !deps.whisperOk || !deps.modelOk) {
-      new Notice("Configurazione incompleta. Vai a Impostazioni → Resonance per completare i campi richiesti.");
+      new Notice("Incomplete configuration. Go to Settings → Resonance to fill in the required fields.");
       return false;
     }
     return true;
   }
 
-  private async toggleFromRibbon() {
+  private async toggleFromRibbonWithPreset() {
     if (!(await this.ensureDepsOk())) return;
 
     const phase = this.recorder.getPhase();
     if (phase === "idle" || phase === "error" || phase === "done") {
-      const ok = await this.confirmStart();
-      if (!ok) return;
-      await this.recorder.start();
+      const presetKey = await this.selectPreset(this.settings.lastPromptKey || DEFAULT_PROMPT_KEY);
+      if (!presetKey) return;
+      await this.recorder.startWithPreset(presetKey);
+      await this.saveSettings({ lastPromptKey: presetKey });
     } else if (phase === "recording") {
       await this.recorder.stop();
     } else {
-      new Notice("Elaborazione in corso… attendi il completamento.");
+      new Notice("Processing… please wait.");
     }
   }
 
@@ -106,6 +139,13 @@ export default class ResonancePlugin extends Plugin {
     if (phase === "transcribing" || phase === "summarizing") this.ribbonIconEl.addClass("processing");
   }
 
+  private moveRibbonToBottom(el: HTMLElement) {
+    const parent = el?.parentElement;
+    if (!parent) return;
+    const first = parent.firstElementChild;
+    if (first !== el) parent.insertBefore(el, first);
+  }
+
   private updateStatusBarState(phase: RecorderPhase) {
     const el = this.statusBarEl;
     if (!el) return;
@@ -114,10 +154,10 @@ export default class ResonancePlugin extends Plugin {
       el.setText("Rec 00:00");
     } else if (phase === "transcribing") {
       (el as any).show?.();
-      el.setText("Trascrizione…");
+      el.setText("Transcribing…");
     } else if (phase === "summarizing") {
       (el as any).show?.();
-      el.setText("Riassunto…");
+      el.setText("Summarizing…");
     } else {
       el.setText("");
       (el as any).hide?.();
@@ -131,24 +171,33 @@ export default class ResonancePlugin extends Plugin {
     this.statusBarEl.setText(`Rec ${mm}:${ss}`);
   }
 
-  private confirmStart(): Promise<boolean> {
-    return new Promise<boolean>((resolve) => {
+  private selectPreset(defaultKey: string): Promise<string | null> {
+    return new Promise<string | null>((resolve) => {
       const modal = new (class extends Modal {
-        constructor(app: App, private onResult: (ok: boolean) => void) { super(app); }
+        private value: string = defaultKey;
+        constructor(app: App, private onResult: (key: string | null) => void) { super(app); }
         onOpen(): void {
           const { contentEl } = this;
           contentEl.empty();
           contentEl.addClass("resonance-modal");
-          contentEl.createEl("h2", { text: "Avvia registrazione?" });
-          contentEl.createEl("p", { text: "Vuoi avviare una registrazione con Resonance?" });
+          contentEl.createEl("h2", { text: "Choose scenario" });
+          const select = contentEl.createEl("select");
+          select.addClass("resonance-inline-select");
+          const keys = getPresetKeys();
+          keys.forEach((k) => {
+            const opt = document.createElement("option");
+            opt.value = k; opt.text = PROMPT_PRESETS[k].label; select.appendChild(opt);
+          });
+          select.value = defaultKey;
+          select.addEventListener("change", () => { this.value = select.value; });
           const controls = contentEl.createEl("div", { cls: "resonance-controls" });
-          const okBtn = controls.createEl("button", { cls: "resonance-btn primary", text: "Avvia" });
-          okBtn.addEventListener("click", () => { this.onResult(true); this.close(); });
-          const cancelBtn = controls.createEl("button", { cls: "resonance-btn secondary", text: "Annulla" });
-          cancelBtn.addEventListener("click", () => { this.onResult(false); this.close(); });
+          const okBtn = controls.createEl("button", { cls: "resonance-btn primary", text: "Start" });
+          okBtn.addEventListener("click", () => { this.onResult(this.value); this.close(); });
+          const cancelBtn = controls.createEl("button", { cls: "resonance-btn secondary", text: "Cancel" });
+          cancelBtn.addEventListener("click", () => { this.onResult(null); this.close(); });
         }
-        onClose(): void { this.onResult(false); }
-      })(this.app, (ok) => resolve(ok));
+        onClose(): void { /* keep last selection on close */ }
+      })(this.app, (key) => resolve(key));
       modal.open();
     });
   }

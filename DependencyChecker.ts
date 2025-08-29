@@ -22,7 +22,7 @@ export async function checkDependencies(options: {
   const missingMessages: string[] = [];
 
   const hasApiKey = !!apiKey && apiKey.trim().length > 0;
-  if (!hasApiKey) missingMessages.push("API Key mancante");
+  if (!hasApiKey) missingMessages.push("Missing API Key");
 
   let ffmpegOk = false;
   let whisperOk = false;
@@ -40,9 +40,9 @@ export async function checkDependencies(options: {
           resolve();
         });
       });
-      if (!ffmpegOk) missingMessages.push("FFmpeg non trovato o non eseguibile");
+      if (!ffmpegOk) missingMessages.push("FFmpeg not found or not executable");
     } else {
-      missingMessages.push("Percorso FFmpeg non impostato");
+      missingMessages.push("FFmpeg path not set");
     }
 
     if (whisperMainPath) {
@@ -52,9 +52,9 @@ export async function checkDependencies(options: {
           resolve();
         });
       });
-      if (!whisperOk) missingMessages.push("whisper.cpp (main) non trovato o non eseguibile");
+      if (!whisperOk) missingMessages.push("whisper.cpp (main) not found or not executable");
     } else {
-      missingMessages.push("Percorso whisper.cpp (main) non impostato");
+      missingMessages.push("whisper.cpp (main) path not set");
     }
 
     if (whisperModelPath) {
@@ -64,16 +64,16 @@ export async function checkDependencies(options: {
           resolve();
         });
       });
-      if (!modelOk) missingMessages.push("Modello Whisper non letto/trovato");
+      if (!modelOk) missingMessages.push("Whisper model not readable/found");
     } else {
-      missingMessages.push("Percorso modello Whisper non impostato");
+      missingMessages.push("Whisper model path not set");
     }
   } catch (e) {
     // In caso di errore d'accesso a fs (sandbox, permessi), forniamo un fallback prudente
     // senza bloccare l'utente, ma indicando l'impossibilità di verificare completamente.
-    if (!ffmpegOk) missingMessages.push("Impossibile verificare FFmpeg (restrizioni runtime)");
-    if (!whisperOk) missingMessages.push("Impossibile verificare whisper.cpp (restrizioni runtime)");
-    if (!modelOk) missingMessages.push("Impossibile verificare il modello Whisper (restrizioni runtime)");
+    if (!ffmpegOk) missingMessages.push("Unable to verify FFmpeg (runtime restrictions)");
+    if (!whisperOk) missingMessages.push("Unable to verify whisper.cpp (runtime restrictions)");
+    if (!modelOk) missingMessages.push("Unable to verify Whisper model (runtime restrictions)");
   }
 
   return { hasApiKey, ffmpegOk, whisperOk, modelOk, missingMessages };

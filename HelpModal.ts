@@ -16,11 +16,11 @@ export class HelpModal extends Modal {
     contentEl.addClass('resonance-modal');
 
     const title = {
-      ffmpeg: 'Guida installazione FFmpeg',
-      whisper: 'Guida installazione Whisper.cpp',
-      llm: 'Guida configurazione LLM (Gemini)',
-      devices: 'Guida dispositivi audio (FFmpeg)',
-      obsidian: 'Guida configurazione Obsidian',
+      ffmpeg: 'FFmpeg setup guide',
+      whisper: 'Whisper.cpp setup guide',
+      llm: 'LLM (Gemini) setup guide',
+      devices: 'Audio devices guide (FFmpeg)',
+      obsidian: 'Obsidian setup guide',
     }[this.topic];
 
     contentEl.createEl('h2', { text: title });
@@ -32,8 +32,24 @@ export class HelpModal extends Modal {
       sec.paragraphs.forEach(p => body.createEl('p', { text: p }));
       if (sec.code) {
         const pre = body.createEl('pre');
+        pre.style.position = 'relative';
         const code = pre.createEl('code');
-        code.innerText = sec.code.trim();
+        const codeText = sec.code.trim();
+        code.innerText = codeText;
+        const copyBtn = pre.createEl('button', { cls: 'resonance-btn secondary small', text: 'Copy' });
+        copyBtn.style.position = 'absolute';
+        copyBtn.style.top = '6px';
+        copyBtn.style.right = '6px';
+        copyBtn.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(codeText);
+            copyBtn.textContent = 'Copied!';
+            setTimeout(()=> copyBtn.textContent = 'Copy', 1200);
+          } catch {
+            copyBtn.textContent = 'Failed';
+            setTimeout(()=> copyBtn.textContent = 'Copy', 1200);
+          }
+        });
       }
     });
   }
@@ -42,36 +58,58 @@ export class HelpModal extends Modal {
     switch (topic) {
       case 'ffmpeg':
         return [
-          { title: 'Cos’è FFmpeg', paragraphs: ['Utility usata per acquisire/registrare audio. È richiesta per registrare riunioni.'] },
-          { title: 'macOS', paragraphs: ['Installa Homebrew, poi FFmpeg, e rileva il percorso.'], code: 'xcode-select --install\nbrew install ffmpeg' },
-          { title: 'Windows', paragraphs: ['Scarica la build statica da ffmpeg.org, estrai e punta a ffmpeg.exe.'], code: 'C:/ffmpeg/bin/ffmpeg.exe' },
-          { title: 'Linux', paragraphs: ['Installa dal gestore pacchetti del sistema (apt, yum, pacman).'], code: 'sudo apt install ffmpeg' },
+          { title: 'What is FFmpeg', paragraphs: [
+            'FFmpeg is a cross‑platform tool to capture, convert and process audio/video.',
+            'Resonance uses FFmpeg to record the microphone and (optionally) system audio.'
+          ]},
+          { title: 'macOS', paragraphs: [
+            'Install Xcode Command Line Tools and Homebrew, then install FFmpeg with the following commands.',
+          ], code: 'brew install ffmpeg' },
+          { title: 'Windows', paragraphs: [
+            'Download a static build from the official website, extract it, then point to ffmpeg.exe.',
+            'Alternatively, if you use Chocolatey: choco install ffmpeg.',
+          ], code: 'C:/ffmpeg/bin/ffmpeg.exe\n:: or\nchoco install ffmpeg' },
+          { title: 'Linux', paragraphs: [
+            'Install FFmpeg from your package manager (Debian/Ubuntu, Fedora, Arch examples).',
+          ], code: 'sudo apt update && sudo apt install -y ffmpeg\n# Fedora/RHEL\nsudo dnf install -y ffmpeg\n# Arch\nsudo pacman -S ffmpeg' },
         ];
       case 'whisper':
         return [
-          { title: 'Cos’è whisper.cpp', paragraphs: ['Trascrizione locale. Usa modelli generici multilingua (.bin). Seleziona una lingua nelle impostazioni oppure lascia Automatico.'] },
-          { title: 'Repo locale', paragraphs: ['Imposta la cartella root del repo whisper.cpp nelle impostazioni. Il plugin proverà a trovare automaticamente whisper-cli dentro build/bin/.'] },
-          { title: 'Compilazione', paragraphs: ['Compila il progetto (make su macOS/Linux o CMake/Visual Studio su Windows).'], code: 'git clone https://github.com/ggerganov/whisper.cpp\ncd whisper.cpp\n# macOS/Linux\nmake -j\n# Windows\ncmake -B build -S .\ncmake --build build --config Release -j' },
-          { title: 'Scaricare un modello', paragraphs: ['Usa la voce Modello (preset) nelle impostazioni per scaricare small/medium/large in whisper.cpp/models/. Oppure esegui lo script del repo.'], code: './models/download-ggml-model.sh medium' },
-          { title: 'Esecuzione di test', paragraphs: ['Esempio con lingua italiana:'], code: './build/bin/whisper-cli -m ./models/ggml-medium.bin -f ./samples/jfk.wav -l it' },
+          { title: 'What is whisper.cpp', paragraphs: [
+            'whisper.cpp is a local speech‑to‑text engine; Resonance runs it on your machine.',
+            'You must set the repo path and choose/download a model (.bin).'
+          ]},
+          { title: 'macOS', paragraphs: [
+            'Clone the repo and build with make; models go into whisper.cpp/models/.',
+            'In Settings → Resonance, set the whisper.cpp repo path and the whisper-cli executable.',
+            'In Settings → Resonance, select and download the model you prefer.'
+          ], code: 'git clone https://github.com/ggerganov/whisper.cpp\ncd whisper.cpp\nmake -j' },
+          { title: 'Windows', paragraphs: [
+            'Clone the repo; build with CMake/Visual Studio in Release; models in whisper.cpp\\models\\.',
+            'In Settings → Resonance, set the whisper.cpp repo path and the whisper-cli executable.',
+            'In Settings → Resonance, select and download the model you prefer.'
+          ], code: 'git clone https://github.com/ggerganov/whisper.cpp\ncd whisper.cpp\ncmake -B build -S .\ncmake --build build --config Release -j\n# example model\npowershell -Command "Invoke-WebRequest https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin -OutFile models/ggml-medium.bin"' },
+          { title: 'Linux', paragraphs: [
+            'Build with make; install build tools if needed; download a model.',
+            'In Settings → Resonance, set the whisper.cpp repo path and the whisper-cli executable.',
+            'In Settings → Resonance, select and download the model you prefer.'
+          ], code: 'sudo apt update && sudo apt install -y build-essential git\ngit clone https://github.com/ggerganov/whisper.cpp\ncd whisper.cpp && make -j\n./models/download-ggml-model.sh medium' },
+          { title: 'Test run', paragraphs: ['Example with Italian language:'], code: './build/bin/whisper-cli -m ./models/ggml-medium.bin -f ./samples/jfk.wav -l it' },
         ];
       case 'llm':
         return [
-          { title: 'Google Gemini', paragraphs: ['Crea l’API Key in Google AI Studio e incollala nelle impostazioni. Scegli il modello (flash/pro/exp).'] },
-          { title: 'Privacy', paragraphs: ['Solo la trascrizione testuale viene inviata al servizio per il riassunto.'] },
+          { title: 'Gemini', paragraphs: ['Create an API Key in Google AI Studio and paste it in Settings. Select the model you prefer. The free version should be enough for personal use.'] },
+          { title: 'Privacy', paragraphs: ['Only the text transcript is sent to the service for summarization, audio stays local.'] },
         ];
       case 'devices':
         return [
-          { title: 'Selezione dispositivi', paragraphs: ['Clicca Scansiona per popolare i menu di Microfono e Audio di sistema.'] },
-          { title: 'Windows (dshow)', paragraphs: ['I nomi appaiono come audio=… Mic / Stereo Mix.'] },
-          { title: 'macOS (avfoundation)', paragraphs: ['I dispositivi sono indicizzati. L’audio di sistema può richiedere un dispositivo virtuale (es. BlackHole).'] },
-          { title: 'Linux (pulse/alsa)', paragraphs: ['Spesso il mic è default. L’audio di sistema richiede un loopback.'] },
+          { title: 'How to select audio devices', paragraphs: ['Use Scan to populate device lists. Select Microphone and optionally System audio depending on your OS.'] },
+          { title: 'Windows (dshow)', paragraphs: ['Devices look like "audio=...". Enable Stereo Mix or similar for system audio if available.'] },
+          { title: 'macOS (avfoundation)', paragraphs: ['Devices are indexed (:0, :1, …). Full system audio requires a virtual device such as BlackHole/Loopback/Soundflower.'] },
+          { title: 'Linux (pulse/alsa)', paragraphs: ['Microphone often is default. Full system audio requires a loopback sink/module (PulseAudio/PipeWire).'] },
         ];
-      case 'obsidian':
-        return [
-          { title: 'Cartella note', paragraphs: ['Imposta la cartella del vault dove salvare le note generate. Se vuoto: root del vault.'] },
-          { title: 'Ricaricare il plugin', paragraphs: ['Dopo una build, disattiva/riattiva il plugin o riavvia Obsidian.'] },
-        ];
+      default:
+        return [];
     }
   }
 }

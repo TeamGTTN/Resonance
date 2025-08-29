@@ -1,9 +1,9 @@
 import { App, Modal, Notice, TFile, moment } from "obsidian";
 import { ResonanceSettings } from "./settings";
 
-// Nota importante sull'esecuzione di processi esterni:
-// Obsidian Desktop consente l'accesso a Node.js (Electron) in plugin community.
-// Usiamo child_process per invocare ffmpeg e whisper.cpp in modo controllato.
+// Note on external processes:
+// Obsidian Desktop provides Node.js (Electron) to community plugins.
+// We invoke ffmpeg and whisper.cpp via child_process in a controlled way.
 
 interface RecordingModalState {
   phase: "idle" | "recording" | "transcribing" | "summarizing" | "error" | "done";
@@ -21,7 +21,7 @@ export class RecordingModal extends Modal {
   private ffmpegChild: any | null = null;
   private stopRecordingFn: (() => Promise<void>) | null = null;
 
-  // Elementi UI di riferimento per aggiornamenti dinamici
+  // UI element refs for dynamic updates
   private statusEl!: HTMLElement;
   private timerEl!: HTMLElement;
   private controlBtn!: HTMLButtonElement;
@@ -38,11 +38,11 @@ export class RecordingModal extends Modal {
     contentEl.empty();
     contentEl.addClass("resonance-modal");
 
-    contentEl.createEl("h2", { text: "Registratore Riunione" });
+    contentEl.createEl("h2", { text: "Meeting Recorder" });
 
     const status = contentEl.createEl("div", { cls: "resonance-status" });
     this.statusEl = status;
-    this.setStatus("Pronto per registrare");
+    this.setStatus("Ready to record");
 
     const timer = contentEl.createEl("div", { cls: "resonance-timer", text: "00:00" });
     this.timerEl = timer;
@@ -53,13 +53,13 @@ export class RecordingModal extends Modal {
     const controls = contentEl.createEl("div", { cls: "resonance-controls" });
     const btn = controls.createEl("button", { cls: "resonance-btn primary" });
     btn.appendChild(createIcon("microphone"));
-    btn.appendText(" Avvia Registrazione");
+    btn.appendText(" Start Recording");
     btn.addEventListener("click", () => this.handleControlClick());
     this.controlBtn = btn as HTMLButtonElement;
 
     const cancel = controls.createEl("button", { cls: "resonance-btn secondary" });
     cancel.appendChild(createIcon("square"));
-    cancel.appendText(" Annulla");
+    cancel.appendText(" Cancel");
     cancel.addEventListener("click", () => this.cancelFlow());
     this.cancelBtn = cancel as HTMLButtonElement;
     this.cancelBtn.hide();
@@ -77,36 +77,36 @@ export class RecordingModal extends Modal {
     this.state.phase = phase;
     switch (phase) {
       case "idle":
-        this.setStatus("Pronto per registrare");
-        this.updateButton("primary", "microphone", "Avvia Registrazione", true);
+        this.setStatus("Ready to record");
+        this.updateButton("primary", "microphone", "Start Recording", true);
         this.cancelBtn.hide();
         this.waveEl.removeClass("active");
         break;
       case "recording":
-        this.setStatus("Registrazione...");
-        this.updateButton("danger", "square", "Ferma Registrazione", true);
+        this.setStatus("Recording...");
+        this.updateButton("danger", "square", "Stop Recording", true);
         this.cancelBtn.hide();
         this.waveEl.addClass("active");
         break;
       case "transcribing":
-        this.setStatus("Trascrizione...");
-        this.updateButton("disabled", "loader", "Elaborazione...", false, true);
+        this.setStatus("Transcribing...");
+        this.updateButton("disabled", "loader", "Processing...", false, true);
         this.cancelBtn.show();
         this.waveEl.removeClass("active");
         break;
       case "summarizing":
-        this.setStatus("Riassunto...");
-        this.updateButton("disabled", "loader", "Elaborazione...", false, true);
+        this.setStatus("Summarizing...");
+        this.updateButton("disabled", "loader", "Processing...", false, true);
         this.cancelBtn.show();
         this.waveEl.removeClass("active");
         break;
       case "error":
-        this.updateButton("primary", "microphone", "Riprova", true);
+        this.updateButton("primary", "microphone", "Retry", true);
         this.cancelBtn.hide();
         this.waveEl.removeClass("active");
         break;
       case "done":
-        this.updateButton("primary", "microphone", "Nuova Registrazione", true);
+        this.updateButton("primary", "microphone", "New Recording", true);
         this.cancelBtn.hide();
         this.waveEl.removeClass("active");
         break;
@@ -153,7 +153,7 @@ export class RecordingModal extends Modal {
         await this.stopRecordingFlow();
       }
     } catch (e: any) {
-      new Notice(`Errore: ${e?.message ?? e}`);
+      new Notice(`Error: ${e?.message ?? e}`);
       this.state.errorMessage = String(e?.message ?? e);
       this.setPhase("error");
       await this.cleanupTemp();
@@ -171,10 +171,10 @@ export class RecordingModal extends Modal {
     }
   }
 
-  // Fase 1: Registrazione Audio con ffmpeg (cross‑platform)
+  // Phase 1: Audio recording with ffmpeg (cross‑platform)
   private async beginRecordingFlow() {
     const { ffmpegPath } = this.settings;
-    if (!ffmpegPath) throw new Error("Percorso FFmpeg non configurato");
+    if (!ffmpegPath) throw new Error("FFmpeg path not configured");
 
     const os = (window as any).require("os");
     const path = (window as any).require("path");
@@ -182,7 +182,7 @@ export class RecordingModal extends Modal {
     const { spawn } = (window as any).require("child_process");
 
     this.tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "resonance-"));
-    this.tempAudio = path.join(this.tempDir, "registrazione.mp3");
+    this.tempAudio = path.join(this.tempDir, "recording.mp3");
 
     const { format, micSpec, systemSpec } = this.resolveFfmpegInput();
 
@@ -194,9 +194,7 @@ export class RecordingModal extends Modal {
       inputs.push("-f", format, "-i", systemSpec);
     }
 
-    if (inputs.length === 0) {
-      throw new Error("Nessun dispositivo di input FFmpeg configurato. Imposta almeno il microfono.");
-    }
+    if (inputs.length === 0) throw new Error("No FFmpeg input device configured. Set at least the microphone.");
 
     const shouldMix = Boolean(micSpec && systemSpec);
     const mixArgs = shouldMix
@@ -211,7 +209,7 @@ export class RecordingModal extends Modal {
     const args = [...inputs, ...mixArgs, ...outputArgs];
     this.ffmpegChild = spawn(ffmpegPath, args, { detached: false });
 
-    // Riferimento per stop (cross‑platform)
+    // Stop reference (cross‑platform)
     this.stopRecordingFn = async () => {
       try {
         const child = this.ffmpegChild;
@@ -248,14 +246,14 @@ export class RecordingModal extends Modal {
     const sys = (this.settings.ffmpegSystemDevice || "").trim();
 
     if (format === "avfoundation") {
-      // macOS: audio-only -> ":index" (non "index:")
+      // macOS: audio-only -> ":index" (not "index:")
       return { format, micSpec: mic || ":0", systemSpec: sys || "" };
     }
     if (format === "dshow") {
-      // Windows: serve 'audio=Nome Dispositivo'
+      // Windows: requires 'audio=Device Name'
       return { format, micSpec: mic || "audio=Microphone (default)", systemSpec: sys || "" };
     }
-    // Linux (pulse/alsa): spesso 'default' funziona per mic; system audio richiede setup loopback
+    // Linux (pulse/alsa): 'default' often works for mic; system audio requires loopback setup
     return { format, micSpec: mic || "default", systemSpec: sys || "" };
   }
 
@@ -265,16 +263,16 @@ export class RecordingModal extends Modal {
       this.stopRecordingFn = null;
     }
     this.clearTimer();
-    await waitMs(500); // tempo per chiusura file
+    await waitMs(500); // allow file to be closed
     await this.transcribeFlow();
   }
 
-  // Fase 2: Trascrizione con whisper.cpp
+  // Phase 2: Transcription with whisper.cpp
   private async transcribeFlow() {
     this.setPhase("transcribing");
     const { whisperMainPath, whisperModelPath, whisperLanguage } = this.settings;
-    if (!whisperMainPath) throw new Error("Percorso whisper-cli non configurato");
-    if (!whisperModelPath) throw new Error("Percorso modello Whisper non configurato");
+    if (!whisperMainPath) throw new Error("whisper-cli path not configured");
+    if (!whisperModelPath) throw new Error("Whisper model path not configured");
 
     const fs = (window as any).require("fs");
     const { spawn } = (window as any).require("child_process");
@@ -292,35 +290,35 @@ export class RecordingModal extends Modal {
       child.stderr?.on("data", (d: Buffer) => { stderrBuf += d.toString(); });
       child.on("error", (err: any) => reject(err));
       child.on("close", (code: number) => {
-        if (code === 0) resolve(); else reject(new Error(`whisper-cli uscita con codice ${code}: ${stderrBuf}`));
+        if (code === 0) resolve(); else reject(new Error(`whisper-cli exited with code ${code}: ${stderrBuf}`));
       });
     });
 
-    // whisper-cli stampa la trascrizione su stdout; usiamo quella.
+    // whisper-cli prints the transcript to stdout; use that.
     const transcript = stdoutBuf.join("").trim();
-    if (!transcript) throw new Error("Trascrizione vuota o non trovata");
+    if (!transcript) throw new Error("Empty transcription");
 
     await this.summarizeFlow(transcript);
   }
 
-  // Fase 3: Riassunto con Google Gemini
+  // Phase 3: Summarization with Google Gemini
   private async summarizeFlow(transcript: string) {
     this.setPhase("summarizing");
     const { geminiApiKey, geminiModel } = this.settings;
-    if (!geminiApiKey) throw new Error("API Key Gemini non configurata");
+    if (!geminiApiKey) throw new Error("Gemini API Key not configured");
 
-    const prompt = `Sei un assistente AI d'élite, specializzato nell'estrarre l'essenza da dialoghi professionali. Analizza la seguente trascrizione di una riunione e distilla le informazioni in un report conciso e strutturato in formato Markdown. Il tuo output deve essere immediatamente utilizzabile.
+    const prompt = `You are a senior AI assistant specialized in distilling meetings into actionable notes. Read the transcript and produce a concise, well‑structured Markdown report.
 
-## Punti Salienti
-- Un elenco puntato che cattura le conclusioni, le intuizioni e i temi principali emersi dalla discussione.
+## Highlights
+- Bulleted list of key outcomes, insights, and themes.
 
-## Decisioni Formalizzate
-- Un elenco chiaro e diretto delle decisioni approvate. Se non ci sono decisioni esplicite, scrivi 'Nessuna decisione formale presa'.
+## Decisions
+- Bullet list of confirmed decisions. If none, write 'No explicit decisions.'
 
-## Piano d'Azione
-- Una checklist di task da completare, formattata come: - [ ] Descrizione chiara del task @Proprietario (se identificabile)
+## Action Items
+- Checklist of tasks: - [ ] Clear task description @Owner (if known)
 
-Se una sezione risulta vuota, omettila elegantemente dal report finale. Concentrati sulla chiarezza e la sintesi.`;
+If a section would be empty, omit it. Prefer clarity and brevity.`;
 
     const model = (geminiModel || "gemini-1.5-pro").trim();
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
@@ -331,7 +329,7 @@ Se una sezione risulta vuota, omettila elegantemente dal report finale. Concentr
           role: "user",
           parts: [
             { text: prompt },
-            { text: `\n\nTrascrizione:\n${transcript}` },
+            { text: `\n\nTranscript:\n${transcript}` },
           ],
         },
       ],
@@ -345,27 +343,27 @@ Se una sezione risulta vuota, omettila elegantemente dal report finale. Concentr
 
     if (!res.ok) {
       const errTxt = await res.text().catch(() => "");
-      throw new Error(`Errore API Gemini: ${res.status} ${errTxt}`);
+      throw new Error(`Gemini API error: ${res.status} ${errTxt}`);
     }
 
     const json = await res.json();
     const summary = extractMarkdownFromGemini(json) || "";
-    if (!summary) throw new Error("Riassunto vuoto dalla risposta di Gemini");
+    if (!summary) throw new Error("Empty summary from Gemini response");
 
     await this.createNoteAndFinish(summary);
   }
 
-  // Fase 4: Creazione nota
+  // Phase 4: Note creation
   private async createNoteAndFinish(markdown: string) {
     const date = window.moment().format("YYYY-MM-DD HH-mm");
-    const fileName = `Riunione ${date}.md`;
+    const fileName = `Meeting ${date}.md`;
     const folder = this.settings.outputFolder?.trim();
 
     const fullPath = folder ? `${folder}/${fileName}` : fileName;
     const vault = this.app.vault;
 
     const tfile = await vault.create(fullPath, markdown);
-    new Notice("Nota creata!");
+    new Notice("Note created!");
 
     this.setPhase("done");
     await this.cleanupTemp();
