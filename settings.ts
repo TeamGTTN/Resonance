@@ -46,7 +46,12 @@ export class ResonanceSettingTab extends PluginSettingTab {
   constructor(app: App, settings: ResonanceSettings, save: (settings: Partial<ResonanceSettings>) => Promise<void>) {
     super(app, (app as any).plugins.getPlugin("resonance"));
     this.settings = settings;
-    this.save = save;
+    const saveFn = save;
+    this.save = async (partial: Partial<ResonanceSettings>) => {
+      await saveFn(partial);
+      // Mantieni lo stato locale sincronizzato per riflettere subito nell'UI
+      this.settings = { ...this.settings, ...partial } as ResonanceSettings;
+    };
     this.pluginId = ((app as any).plugins.getPlugin("resonance")?.manifest?.id) || "resonance";
   }
 
@@ -88,6 +93,7 @@ export class ResonanceSettingTab extends PluginSettingTab {
           .setPlaceholder("/opt/homebrew/bin/ffmpeg or C:/ffmpeg/bin/ffmpeg.exe")
           .setValue(this.settings.ffmpegPath)
           .onChange(async (value) => { await this.save({ ffmpegPath: value.trim() }); })
+          .inputEl.style.width = "300px"
       );
     ffmpegSetting.addButton((btn) => btn.setButtonText("Detect").onClick(async () => {
       const guess = await this.autoDetectFfmpeg();
@@ -104,26 +110,29 @@ export class ResonanceSettingTab extends PluginSettingTab {
     .setDesc("Manual installation required.")
     .addButton((btn)=> btn.setButtonText("Guide").onClick(()=> new HelpModal(this.app, 'whisper').open()));
 
+    // Campo di testo allargato per il percorso della repo whisper.cpp
     new Setting(containerEl)
       .setName("whisper.cpp repo path")
-      .setDesc("Repo root folder (e.g., /path/whisper.cpp)")
-      .addText(text =>
+      .setDesc("Cartella root della repo (es: /path/whisper.cpp)")
+      .addText(text => {
         text
           .setPlaceholder(process.platform === 'win32' ? 'C:/whisper.cpp' : '/path/whisper.cpp')
           .setValue(this.settings.whisperRepoPath || '')
           .onChange(async (value) => { await this.save({ whisperRepoPath: value.trim() }); })
-      );
+          .inputEl.style.width = "300px"
+      });
 
     const whisperSetting = new Setting(containerEl)
       .setName("whisper-cli executable")
-      .setDesc("Auto‑resolved from repo; you can override it.")
+      .setDesc("Auto‑resolved from repo, you may need to manually select the correct file.")
       .addText(text =>
         text
           .setPlaceholder(process.platform === 'win32' ? 'C:/whisper/build/bin/whisper-cli.exe' : '/path/whisper.cpp/build/bin/whisper-cli')
           .setValue(this.settings.whisperMainPath)
           .onChange(async (value) => { await this.save({ whisperMainPath: value.trim() }); })
+          .inputEl.style.width = "300px"
       );
-    whisperSetting.addButton((btn)=> btn.setButtonText("Find from repo").onClick(async ()=>{
+    whisperSetting.addButton((btn)=> btn.setButtonText("Detect").onClick(async ()=>{
       const cli = await this.findWhisperCliFromRepo(this.settings.whisperRepoPath);
       if (cli) { await this.save({ whisperMainPath: cli }); new Notice('whisper-cli found'); this.display(); }
       else new Notice('whisper-cli not found. Build the repo (cmake/make).');
@@ -139,7 +148,7 @@ export class ResonanceSettingTab extends PluginSettingTab {
         drop.setValue(this.settings.whisperModelPreset || 'medium');
         drop.onChange(async (value)=> { await this.save({ whisperModelPreset: value as any }); });
       });
-    modelPreset.addButton((btn)=> btn.setButtonText("Download model").onClick(async ()=>{
+    modelPreset.addButton((btn)=> btn.setButtonText("Download").onClick(async ()=>{
       try {
         const file = await this.downloadModelPreset();
         if (file) { await this.save({ whisperModelPath: file }); new Notice('Model ready: ' + file); this.display(); }
@@ -155,6 +164,7 @@ export class ResonanceSettingTab extends PluginSettingTab {
           .setPlaceholder(process.platform === 'win32' ? 'C:/whisper/models/ggml-medium.bin' : '/path/whisper.cpp/models/ggml-medium.bin')
           .setValue(this.settings.whisperModelPath)
           .onChange(async (value) => { await this.save({ whisperModelPath: value.trim() }); })
+          .inputEl.style.width = "300px"
       );
 
     new Setting(containerEl)
@@ -189,7 +199,6 @@ export class ResonanceSettingTab extends PluginSettingTab {
       .setDesc("Key is stored locally in your vault.")
       .addText(text =>
         text
-          .setPlaceholder("gai-...")
           .setValue(this.settings.geminiApiKey)
           .onChange(async (value) => { await this.save({ geminiApiKey: value }); })
       );
@@ -214,6 +223,10 @@ export class ResonanceSettingTab extends PluginSettingTab {
     // STEP 4: Audio devices
     containerEl.createEl("h3", { text: "Audio devices" });
     containerEl.createEl("p", { text: "Select backend and choose devices." });
+
+    new Setting(containerEl)
+    .setName("Configuration")
+    .addButton((btn)=> btn.setButtonText("Guide").onClick(()=> new HelpModal(this.app, 'devices').open()));
 
     new Setting(containerEl)
       .setName("FFmpeg backend")
@@ -296,8 +309,19 @@ export class ResonanceSettingTab extends PluginSettingTab {
     while (sysSelect.options.length > 1) sysSelect.remove(1);
 
     const audioDevices = this.lastScan.filter(d => d.type !== 'video');
-    audioDevices.forEach(d => {
+
+    const isSystemCandidate = (label: string): boolean => {
+      if (backend !== 'dshow') return true; // su mac/linux non distinguiamo
+      return /(stereo\s*mix|virtual-?audio-?capturer|vb[- ]?audio|voice\s*meeter|voicemeeter|cable\s*output|loopback)/i.test(label);
+    };
+
+    const micDevices = audioDevices.filter(d => !isSystemCandidate(d.label));
+    const sysDevices = audioDevices.filter(d => isSystemCandidate(d.label));
+
+    (micDevices.length ? micDevices : audioDevices).forEach(d => {
       const o1 = document.createElement('option'); o1.value = d.name; o1.text = d.label; micSelect.appendChild(o1);
+    });
+    sysDevices.forEach(d => {
       const o2 = document.createElement('option'); o2.value = d.name; o2.text = d.label; sysSelect.appendChild(o2);
     });
 
@@ -431,14 +455,16 @@ export class ResonanceSettingTab extends PluginSettingTab {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'resonance-test-'));
     const out = path.join(tmpDir, 'test.mp3');
 
-    const args: string[] = ['-y', '-f', backend, '-i', mic, '-t', '3', '-acodec', 'libmp3lame', '-ab', '128k', out];
+    const normalize = (b: string, v: string) => b === 'dshow' && !/^(audio=|video=|@device_)/i.test(v) ? `audio=${v}` : v;
+    const micArg = normalize(backend, mic);
+    const args: string[] = ['-y', '-f', backend, '-i', micArg, '-t', '1', '-acodec', 'libmp3lame', '-ab', '128k', out];
     const child = spawn(ffmpeg, args);
 
     let stderr = '';
     child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
 
     child.on('close', (code: number) => {
-      if (code === 0) new Notice('Test completed: 3s recording created');
+      if (code === 0) new Notice('Test passed!');
       else {
         const hint = stderr.split(/\r?\n/).slice(-6).join('\n');
         new Notice(`Test failed (code ${code}).\n${hint}`);

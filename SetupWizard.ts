@@ -93,7 +93,7 @@ export class SetupWizard extends Modal {
     const detect = this.content.createEl("button", { cls: "resonance-btn secondary", text: "Detect" });
     detect.addEventListener('click', async () => {
       const guess = await (window as any).resonanceAutoDetectFfmpeg?.();
-      if (guess) input.value = guess;
+      if (guess) { input.value = guess; await this.save({ ffmpegPath: guess }); new Notice('FFmpeg detected'); }
       else new Notice('No FFmpeg found');
     });
   }
@@ -134,7 +134,8 @@ export class SetupWizard extends Modal {
     const detect = this.content.createEl("button", { cls: "resonance-btn secondary", text: "Detect" });
     detect.addEventListener('click', async () => {
       const guess = await (window as any).resonanceAutoDetectWhisper?.();
-      if (guess) mainInput.value = guess; else new Notice('No whisper main found');
+      if (guess) { mainInput.value = guess; await this.save({ whisperMainPath: guess }); new Notice('whisper-cli detected'); }
+      else new Notice('No whisper main found');
     });
 
     const modelInput = this.content.createEl("input");

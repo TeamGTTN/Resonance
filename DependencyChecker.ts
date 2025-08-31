@@ -35,7 +35,9 @@ export async function checkDependencies(options: {
 
     if (ffmpegPath) {
       await new Promise<void>((resolve) => {
-        access(ffmpegPath, constants?.X_OK ?? 1, (err: any) => {
+        // Su Windows, X_OK può non essere affidabile per .exe; F_OK è sufficiente.
+        const mode = process.platform === 'win32' ? (constants?.F_OK ?? 0) : (constants?.X_OK ?? 1);
+        access(ffmpegPath, mode, (err: any) => {
           ffmpegOk = !err;
           resolve();
         });
@@ -47,7 +49,8 @@ export async function checkDependencies(options: {
 
     if (whisperMainPath) {
       await new Promise<void>((resolve) => {
-        access(whisperMainPath, constants?.X_OK ?? 1, (err: any) => {
+        const mode = process.platform === 'win32' ? (constants?.F_OK ?? 0) : (constants?.X_OK ?? 1);
+        access(whisperMainPath, mode, (err: any) => {
           whisperOk = !err;
           resolve();
         });

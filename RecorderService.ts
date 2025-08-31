@@ -171,7 +171,14 @@ export class RecorderService {
     const sys = (this.settings.ffmpegSystemDevice || "").trim();
     // macOS: audio-only -> ":index" (not "index:")
     if (format === "avfoundation") return { format, micSpec: mic || ":0", systemSpec: sys || "" };
-    if (format === "dshow") return { format, micSpec: mic || "audio=Microphone (default)", systemSpec: sys || "" };
+    if (format === "dshow") {
+      const ensureDshowPrefix = (v: string): string => {
+        if (!v) return v;
+        return /^(audio=|video=|@device_)/i.test(v) ? v : `audio=${v}`;
+      };
+      const micName = mic || "audio=Microphone (default)";
+      return { format, micSpec: ensureDshowPrefix(micName), systemSpec: sys ? ensureDshowPrefix(sys) : "" };
+    }
     return { format, micSpec: mic || "default", systemSpec: sys || "" };
   }
 
@@ -195,7 +202,7 @@ export class RecorderService {
     this.startElapsedTimer();
 
     const args = ["-y", ...inputs, ...mixArgs, ...outputArgs];
-    this.ffmpegChild = spawn(ffmpegPath, args, { detached: false });
+    this.ffmpegChild = spawn(ffmpegPath, args, { detached: false, stdio: ["pipe", "ignore", "pipe"] });
     this.appendLog(`FFmpeg started: ${ffmpegPath} ${args.join(" ")}`);
 
     // Collect stderr to surface meaningful tail on errors
@@ -223,22 +230,22 @@ export class RecorderService {
       try {
         const child = this.ffmpegChild;
         if (!child) return;
+        // Prova chiusura "graceful" inviando 'q' su stdin (FFmpeg flush + finalize)
+        try { child.stdin?.write("q\n"); } catch {}
+        const closed = await waitChildClose(child, 1500);
+        if (closed) return;
+        // fallback: segnali
+        try { child.kill("SIGINT"); } catch {}
+        if (await waitChildClose(child, 1200)) return;
+        try { child.kill("SIGTERM"); } catch {}
+        if (await waitChildClose(child, 1000)) return;
         if (process.platform === "win32") {
-          try { child.kill("SIGINT"); } catch {}
-          await waitMs(900);
-          try { child.kill("SIGTERM"); } catch {}
-          await waitMs(700);
-          if (!child.killed) {
-            const { spawn: sp } = (window as any).require("child_process");
-            try { sp("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true }); } catch {}
-            await waitMs(600);
-          }
+          const { spawn: sp } = (window as any).require("child_process");
+          try { sp("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true }); } catch {}
+          await waitChildClose(child, 800);
         } else {
-          try { child.kill("SIGINT"); } catch {}
-          await waitMs(900);
-          try { child.kill("SIGTERM"); } catch {}
-          await waitMs(700);
           try { child.kill("SIGKILL"); } catch {}
+          await waitChildClose(child, 500);
         }
       } catch {}
     };
@@ -323,7 +330,15 @@ export class RecorderService {
   }
 
   private async createNote(markdown: string) {
-    const fileName = `Meeting ${window.moment().format("YYYY-MM-DD HH-mm")}.md`;
+    const date = window.moment().format("YYYY-MM-DD HH-mm");
+    let scenarioLabel: string | null = null;
+    try {
+      const { PROMPT_PRESETS, DEFAULT_PROMPT_KEY } = await import('./prompts');
+      const key = (this.selectedPresetKey || this.settings.lastPromptKey || DEFAULT_PROMPT_KEY);
+      scenarioLabel = PROMPT_PRESETS[key]?.label || null;
+    } catch {}
+    const safe = (s: string) => s.replace(/[\\/:*?"<>|]/g, '-');
+    const fileName = scenarioLabel ? `Meeting (${safe(scenarioLabel)}) ${date}.md` : `Meeting ${date}.md`;
     const folder = this.settings.outputFolder?.trim();
     const fullPath = folder ? `${folder}/${fileName}` : fileName;
     const tfile = await this.app.vault.create(fullPath, markdown);
@@ -354,6 +369,15 @@ function extractMarkdownFromGemini(json: any): string | null {
 
 function waitMs(ms: number) {
   return new Promise<void>(resolve => setTimeout(resolve, ms));
+}
+
+async function waitChildClose(child: any, timeoutMs: number): Promise<boolean> {
+  return await new Promise<boolean>((resolve) => {
+    let done = false;
+    const onClose = () => { if (!done) { done = true; resolve(true); } };
+    child.once?.("close", onClose);
+    setTimeout(() => { if (!done) { done = true; try { child.off?.("close", onClose); } catch {} resolve(false); } }, timeoutMs);
+  });
 }
 
 

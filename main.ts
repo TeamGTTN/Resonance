@@ -4,6 +4,7 @@ import { checkDependencies } from "./DependencyChecker";
 // @ts-expect-error: module is resolved at runtime by the bundler
 import { RecorderService, type RecorderPhase } from "./RecorderService";
 import { PROMPT_PRESETS, DEFAULT_PROMPT_KEY, getPresetKeys } from "./prompts";
+import { autoDetectFfmpeg, autoDetectWhisperFromRepo } from "./AutoDetect";
 
 declare global {
   interface Window {
@@ -96,6 +97,51 @@ export default class ResonancePlugin extends Plugin {
     this.recorder.onInfo = (message: string) => {
       new Notice(message);
     };
+
+    // Expose global helpers for the Setup Wizard
+    window.resonanceAutoDetectFfmpeg = async () => {
+      try { return await autoDetectFfmpeg(); } catch { return null; }
+    };
+    window.resonanceAutoDetectWhisper = async () => {
+      try { return await autoDetectWhisperFromRepo(this.settings.whisperRepoPath); } catch { return null; }
+    };
+    window.resonanceQuickTest = async () => {
+      try {
+        const ffmpeg = (this.settings.ffmpegPath || '').trim();
+        if (!ffmpeg) return false;
+        const backend = (() => {
+          const fmt = (this.settings.ffmpegInputFormat || 'auto');
+          if (fmt !== 'auto') return fmt;
+          if (process.platform === 'win32') return 'dshow';
+          if (process.platform === 'darwin') return 'avfoundation';
+          return 'pulse';
+        })();
+        const mic = (() => {
+          const v = (this.settings.ffmpegMicDevice || '').trim();
+          if (v) return v;
+          if (backend === 'avfoundation') return ':0';
+          if (backend === 'dshow') return 'audio=Microphone (default)';
+          return 'default';
+        })();
+
+        const { spawn } = (window as any).require('child_process');
+        const os = (window as any).require('os');
+        const path = (window as any).require('path');
+        const fs = (window as any).require('fs');
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'resonance-qt-'));
+        const out = path.join(tmpDir, 'test.mp3');
+        const normalize = (b: string, v: string) => b === 'dshow' && !/^(audio=|video=|@device_)/i.test(v) ? `audio=${v}` : v;
+        const micArg = normalize(backend, mic);
+        const args: string[] = ['-y', '-f', backend, '-i', micArg, '-t', '3', '-acodec', 'libmp3lame', '-ab', '128k', out];
+        const code: number = await new Promise((resolve) => {
+          const child = spawn(ffmpeg, args);
+          child.on('error', () => resolve(1));
+          child.on('close', (c: number) => resolve(c ?? 1));
+        });
+        try { fs.unlinkSync(out); fs.rmdirSync(tmpDir); } catch {}
+        return code === 0;
+      } catch { return false; }
+    };
   }
 
   async onunload() {}
@@ -180,7 +226,8 @@ export default class ResonancePlugin extends Plugin {
           const { contentEl } = this;
           contentEl.empty();
           contentEl.addClass("resonance-modal");
-          contentEl.createEl("h2", { text: "Choose scenario" });
+          contentEl.createEl("h2", { text: "Select a Scenario" });
+          contentEl.createEl("p", { text: "Choose the type of summary you want to generate." });
           const select = contentEl.createEl("select");
           select.addClass("resonance-inline-select");
           const keys = getPresetKeys();

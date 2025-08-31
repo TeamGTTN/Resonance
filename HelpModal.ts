@@ -18,7 +18,7 @@ export class HelpModal extends Modal {
     const title = {
       ffmpeg: 'FFmpeg setup guide',
       whisper: 'Whisper.cpp setup guide',
-      llm: 'LLM (Gemini) setup guide',
+      llm: 'LLM setup guide',
       devices: 'Audio devices guide (FFmpeg)',
       obsidian: 'Obsidian setup guide',
     }[this.topic];
@@ -67,11 +67,11 @@ export class HelpModal extends Modal {
           ], code: 'brew install ffmpeg' },
           { title: 'Windows', paragraphs: [
             'Download a static build from the official website, extract it, then point to ffmpeg.exe.',
-            'Alternatively, if you use Chocolatey: choco install ffmpeg.',
-          ], code: 'C:/ffmpeg/bin/ffmpeg.exe\n:: or\nchoco install ffmpeg' },
+            'Alternatively, if you use Chocolatey.',
+          ], code: 'choco install ffmpeg' },
           { title: 'Linux', paragraphs: [
-            'Install FFmpeg from your package manager (Debian/Ubuntu, Fedora, Arch examples).',
-          ], code: 'sudo apt update && sudo apt install -y ffmpeg\n# Fedora/RHEL\nsudo dnf install -y ffmpeg\n# Arch\nsudo pacman -S ffmpeg' },
+            'Install FFmpeg from your package manager.',
+          ], code: 'sudo apt install ffmpeg' },
         ];
       case 'whisper':
         return [
@@ -80,20 +80,20 @@ export class HelpModal extends Modal {
             'You must set the repo path and choose/download a model (.bin).'
           ]},
           { title: 'macOS', paragraphs: [
-            'Clone the repo and build with make; models go into whisper.cpp/models/.',
+            'Clone the repo and build with make.',
             'In Settings → Resonance, set the whisper.cpp repo path and the whisper-cli executable.',
             'In Settings → Resonance, select and download the model you prefer.'
           ], code: 'git clone https://github.com/ggerganov/whisper.cpp\ncd whisper.cpp\nmake -j' },
           { title: 'Windows', paragraphs: [
-            'Clone the repo; build with CMake/Visual Studio in Release; models in whisper.cpp\\models\\.',
+            'Clone the repo and build with CMake, you may need to install Visual Studio with c++ tools and use the developer command prompt.',
             'In Settings → Resonance, set the whisper.cpp repo path and the whisper-cli executable.',
             'In Settings → Resonance, select and download the model you prefer.'
-          ], code: 'git clone https://github.com/ggerganov/whisper.cpp\ncd whisper.cpp\ncmake -B build -S .\ncmake --build build --config Release -j\n# example model\npowershell -Command "Invoke-WebRequest https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin -OutFile models/ggml-medium.bin"' },
+          ], code: 'git clone https://github.com/ggerganov/whisper.cpp\ncd whisper.cpp\ncmake -B build -S .\ncmake --build build --config Release -j"' },
           { title: 'Linux', paragraphs: [
-            'Build with make; install build tools if needed; download a model.',
+            'Clone the repo and build with make.',
             'In Settings → Resonance, set the whisper.cpp repo path and the whisper-cli executable.',
             'In Settings → Resonance, select and download the model you prefer.'
-          ], code: 'sudo apt update && sudo apt install -y build-essential git\ngit clone https://github.com/ggerganov/whisper.cpp\ncd whisper.cpp && make -j\n./models/download-ggml-model.sh medium' },
+          ], code: 'sudo apt update && sudo apt install -y build-essential git\ngit clone https://github.com/ggerganov/whisper.cpp\ncd whisper.cpp && make -j' },
           { title: 'Test run', paragraphs: ['Example with Italian language:'], code: './build/bin/whisper-cli -m ./models/ggml-medium.bin -f ./samples/jfk.wav -l it' },
         ];
       case 'llm':
@@ -104,9 +104,9 @@ export class HelpModal extends Modal {
       case 'devices':
         return [
           { title: 'How to select audio devices', paragraphs: ['Use Scan to populate device lists. Select Microphone and optionally System audio depending on your OS.'] },
-          { title: 'Windows (dshow)', paragraphs: ['Devices look like "audio=...". Enable Stereo Mix or similar for system audio if available.'] },
-          { title: 'macOS (avfoundation)', paragraphs: ['Devices are indexed (:0, :1, …). Full system audio requires a virtual device such as BlackHole/Loopback/Soundflower.'] },
-          { title: 'Linux (pulse/alsa)', paragraphs: ['Microphone often is default. Full system audio requires a loopback sink/module (PulseAudio/PipeWire).'] },
+          { title: 'Windows (dshow)', paragraphs: ['For full system audio enable Stereo Mix or use a virtual device such as Voicemeeter.'] },
+          { title: 'macOS (avfoundation)', paragraphs: ['For full system audio use BlackHole or Loopback.'] },
+          { title: 'Linux (pulse/alsa)', paragraphs: ['For full system audio use Loopback.'] },
         ];
       default:
         return [];

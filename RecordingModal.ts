@@ -206,30 +206,29 @@ export class RecordingModal extends Modal {
     this.setPhase("recording");
     this.startTimer();
 
-    const args = [...inputs, ...mixArgs, ...outputArgs];
-    this.ffmpegChild = spawn(ffmpegPath, args, { detached: false });
+    const args = ["-y", ...inputs, ...mixArgs, ...outputArgs];
+    this.ffmpegChild = spawn(ffmpegPath, args, { detached: false, stdio: ["pipe", "ignore", "pipe"] });
 
     // Stop reference (cross‑platform)
     this.stopRecordingFn = async () => {
       try {
         const child = this.ffmpegChild;
         if (!child) return;
+        // graceful: invia 'q' a FFmpeg per flush e finalizzazione
+        try { child.stdin?.write("q\n"); } catch {}
+        const closed = await waitChildClose(child, 1500);
+        if (closed) return;
+        try { child.kill("SIGINT"); } catch {}
+        if (await waitChildClose(child, 1200)) return;
+        try { child.kill("SIGTERM"); } catch {}
+        if (await waitChildClose(child, 1000)) return;
         if (process.platform === "win32") {
-          try { child.kill("SIGINT"); } catch {}
-          await waitMs(900);
-          try { child.kill("SIGTERM"); } catch {}
-          await waitMs(700);
-          if (!child.killed) {
-            const { spawn: sp } = (window as any).require("child_process");
-            try { sp("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true }); } catch {}
-            await waitMs(600);
-          }
+          const { spawn: sp } = (window as any).require("child_process");
+          try { sp("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true }); } catch {}
+          await waitChildClose(child, 800);
         } else {
-          try { child.kill("SIGINT"); } catch {}
-          await waitMs(900);
-          try { child.kill("SIGTERM"); } catch {}
-          await waitMs(700);
           try { child.kill("SIGKILL"); } catch {}
+          await waitChildClose(child, 500);
         }
       } catch {}
     };
@@ -250,8 +249,13 @@ export class RecordingModal extends Modal {
       return { format, micSpec: mic || ":0", systemSpec: sys || "" };
     }
     if (format === "dshow") {
-      // Windows: requires 'audio=Device Name'
-      return { format, micSpec: mic || "audio=Microphone (default)", systemSpec: sys || "" };
+      // Windows: requires 'audio=Device Name' (ensure prefix if missing)
+      const ensureDshowPrefix = (v: string): string => {
+        if (!v) return v;
+        return /^(audio=|video=|@device_)/i.test(v) ? v : `audio=${v}`;
+      };
+      const micName = mic || "audio=Microphone (default)";
+      return { format, micSpec: ensureDshowPrefix(micName), systemSpec: sys ? ensureDshowPrefix(sys) : "" };
     }
     // Linux (pulse/alsa): 'default' often works for mic; system audio requires loopback setup
     return { format, micSpec: mic || "default", systemSpec: sys || "" };
@@ -356,7 +360,14 @@ If a section would be empty, omit it. Prefer clarity and brevity.`;
   // Phase 4: Note creation
   private async createNoteAndFinish(markdown: string) {
     const date = window.moment().format("YYYY-MM-DD HH-mm");
-    const fileName = `Meeting ${date}.md`;
+    let scenarioLabel: string | null = null;
+    try {
+      const { PROMPT_PRESETS, DEFAULT_PROMPT_KEY } = await import('./prompts');
+      const key = (this.settings.lastPromptKey || DEFAULT_PROMPT_KEY);
+      scenarioLabel = PROMPT_PRESETS[key]?.label || null;
+    } catch {}
+    const safe = (s: string) => s.replace(/[\\/:*?"<>|]/g, '-');
+    const fileName = scenarioLabel ? `${safe(scenarioLabel)} ${date}.md` : `Meeting ${date}.md`;
     const folder = this.settings.outputFolder?.trim();
 
     const fullPath = folder ? `${folder}/${fileName}` : fileName;
@@ -411,4 +422,13 @@ function extractMarkdownFromGemini(json: any): string | null {
 
 function waitMs(ms: number) {
   return new Promise<void>(resolve => setTimeout(resolve, ms));
+}
+
+async function waitChildClose(child: any, timeoutMs: number): Promise<boolean> {
+  return await new Promise<boolean>((resolve) => {
+    let done = false;
+    const onClose = () => { if (!done) { done = true; resolve(true); } };
+    child.once?.("close", onClose);
+    setTimeout(() => { if (!done) { done = true; try { child.off?.("close", onClose); } catch {} resolve(false); } }, timeoutMs);
+  });
 }

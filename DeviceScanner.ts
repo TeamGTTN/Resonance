@@ -38,16 +38,24 @@ function parseFfmpegDeviceList(output: string, backend: 'dshow' | 'avfoundation'
 
   if (backend === 'dshow') {
     let section: 'audio' | 'video' | 'unknown' = 'unknown';
-    for (const line of lines) {
-      if (/DirectShow audio devices/i.test(line)) section = 'audio';
-      else if (/DirectShow video devices/i.test(line)) section = 'video';
-      const m = line.match(/\s+"(.+?)"/);
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (/DirectShow audio devices/i.test(line)) { section = 'audio'; continue; }
+      if (/DirectShow video devices/i.test(line)) { section = 'video'; continue; }
+      // Salta i nomi alternativi tipo: Alternative name "@device_sw_{GUID}..."
+      if (/Alternative name\s+"/.test(line)) continue;
+      const m = line.match(/\s*"(.+?)"/);
       if (m) {
         const label = m[1];
-        const name = section === 'audio' ? `audio=${label}` : label;
-        devices.push({ backend, type: section, name, label });
+        if (/^@device_/i.test(label)) continue; // evita GUID poco usabili
+        const type: 'audio' | 'video' | 'unknown' = section;
+        const name = type === 'audio' ? `audio=${label}` : label;
+        devices.push({ backend, type, name, label });
       }
     }
+    // de-duplica per etichetta
+    const seen = new Set<string>();
+    return devices.filter(d => { const k = `${d.type}|${d.label}`; if (seen.has(k)) return false; seen.add(k); return true; });
   } else if (backend === 'avfoundation') {
     // Esempio:
     // AVFoundation video devices:

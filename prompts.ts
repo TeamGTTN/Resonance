@@ -9,7 +9,7 @@ export const DEFAULT_PROMPT_KEY = "work_meeting";
 export const PROMPT_PRESETS: Record<string, PromptPreset> = {
   work_meeting: {
     key: "work_meeting",
-    label: "Work meeting",
+    label: "Meeting",
     prompt: `You are an elite meeting note‑taker. Produce a clean, skimmable Markdown report in the SAME language as the transcript.
 
 Always include, in this order:
@@ -24,7 +24,7 @@ IMPORTANT: If the transcript is empty or invalid, return an empty string.
   },
   university_lecture: {
     key: "university_lecture",
-    label: "University lecture",
+    label: "Lecture",
     prompt: `You are an expert study note‑taker. Produce clear Markdown notes in the SAME language as the transcript.
 
 Always include:
@@ -66,7 +66,7 @@ IMPORTANT: If the transcript is empty or invalid, return an empty string.`,
   },
   standup: {
     key: "standup",
-    label: "Daily stand‑up",
+    label: "Stand‑up",
     prompt: `Create a brief Markdown stand‑up report in the SAME language as the transcript.
 
 Always include:
