@@ -256,7 +256,8 @@ export default class ResonancePlugin extends Plugin {
   }
 
   async saveSettings(partial: Partial<ResonanceSettings>) {
-    this.settings = { ...this.settings, ...partial };
+    // Mantieni la stessa reference dell'oggetto settings per sincronizzare i consumer (es. RecorderService)
+    Object.assign(this.settings, partial);
     await this.saveData(this.settings);
   }
 }

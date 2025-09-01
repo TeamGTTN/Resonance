@@ -173,30 +173,82 @@ export class RecorderService {
     const sysSaved = (this.settings.ffmpegSystemDevice || "").trim();
 
     if (format === "avfoundation") {
-      // Remap dinamico per macOS: risolve l'indice corrente in base alla label salvata
-      const ffmpeg = (this.settings.ffmpegPath || "").trim();
-      let micSpec = micSaved;
-      let systemSpec = sysSaved;
+      // Su macOS gli indici AVFoundation cambiano tra sessioni.
+      // Rimappiamo in base al label salvato (se presente), altrimenti verifichiamo l'esistenza dell'indice corrente.
+      const ffmpegPath = (this.settings.ffmpegPath || "").trim();
+      let devices: Awaited<ReturnType<typeof scanDevices>> = [];
       try {
-        if (ffmpeg) {
-          const list = await scanDevices(ffmpeg, 'avfoundation');
-          const audioList = list.filter(d => d.type === 'audio');
+        if (ffmpegPath) devices = await scanDevices(ffmpegPath, "avfoundation");
+      } catch (e: any) {
+        this.appendLog(`Device scan failed: ${e?.message ?? e}`);
+      }
 
-          const normalize = (s: string) => (s || '').replace(/^[0-9]+:\s*/, '').trim();
-          const targetMicLabel = normalize(this.settings.ffmpegMicLabel || "");
-          const targetSysLabel = normalize(this.settings.ffmpegSystemLabel || "");
+      const stripPrefix = (s: string) => s.replace(/^\d+:\s*/, "").trim();
+      const audioDevices = devices.filter(d => d.type === "audio");
 
-          if (targetMicLabel) {
-            const found = audioList.find(d => normalize(d.label) === targetMicLabel);
-            if (found) micSpec = found.name; // es.: ":0"
-          }
-          if (targetSysLabel) {
-            const found2 = audioList.find(d => normalize(d.label) === targetSysLabel);
-            if (found2) systemSpec = found2.name;
-          }
-        }
+      const micLabelSaved = stripPrefix((this.settings.ffmpegMicLabel || ""));
+      const sysLabelSaved = stripPrefix((this.settings.ffmpegSystemLabel || ""));
+
+      const findByLabel = (label: string) => audioDevices.find(d => stripPrefix(d.label) === label);
+      const findByName = (name: string) => audioDevices.find(d => d.name === name);
+      const findByIndexString = (idxStr: string) => audioDevices.find(d => d.name === `:${idxStr}`);
+
+      const normalizeIndexish = (v: string): string => {
+        if (!v) return "";
+        if (/^:\d+$/.test(v)) return v; // già formattato
+        if (/^\d+$/.test(v)) return `:${v}`; // solo numero → aggiungi prefisso audio
+        return ""; // non valido per avfoundation audio
+      };
+
+      let micSpec = "";
+      let systemSpec = "";
+
+      // Microfono: priorità label → nome → indice salvato normalizzato → default
+      const micByLabel = micLabelSaved ? findByLabel(micLabelSaved) : undefined;
+      const micSavedNormalized = normalizeIndexish(micSaved);
+      const micByName = micSaved ? findByName(micSaved) : undefined;
+      const micByIdx = micSavedNormalized ? findByName(micSavedNormalized) || findByIndexString(micSavedNormalized.slice(1)) : undefined;
+      if (micByLabel) micSpec = micByLabel.name;
+      else if (micByName) micSpec = micByName.name;
+      else if (micByIdx) micSpec = micByIdx.name;
+      else micSpec = ":0";
+
+      const micResolvedObj = audioDevices.find(d => d.name === micSpec);
+      if (micSpec !== micSaved) {
+        this.appendLog(`Remapped microphone to ${micSpec} (was ${micSaved || 'unset'})`);
+      } else {
+        this.appendLog(`Using mic device: ${micSpec} (saved: ${micSaved || 'none'})`);
+      }
+      // Allinea sempre i settings persistiti al valore risolto
+      try {
+        await this.saveSettings({ ffmpegMicDevice: micSpec, ffmpegMicLabel: micResolvedObj?.label || micLabelSaved || "" });
       } catch {}
-      return { format, micSpec: micSpec || ":0", systemSpec: systemSpec || "" };
+
+      // System audio: stessa strategia (se configurato)
+      if (sysLabelSaved || sysSaved) {
+        const sysByLabel = sysLabelSaved ? findByLabel(sysLabelSaved) : undefined;
+        const sysSavedNormalized = normalizeIndexish(sysSaved);
+        const sysByName = sysSaved ? findByName(sysSaved) : undefined;
+        const sysByIdx = sysSavedNormalized ? findByName(sysSavedNormalized) || findByIndexString(sysSavedNormalized.slice(1)) : undefined;
+        if (sysByLabel) systemSpec = sysByLabel.name;
+        else if (sysByName) systemSpec = sysByName.name;
+        else if (sysByIdx) systemSpec = sysByIdx.name;
+        else systemSpec = "";
+        const sysResolvedObj = systemSpec ? audioDevices.find(d => d.name === systemSpec) : undefined;
+        if (systemSpec && systemSpec !== sysSaved) {
+          this.appendLog(`Remapped system audio to ${systemSpec} (was ${sysSaved || 'unset'})`);
+        } else if (systemSpec) {
+          this.appendLog(`Using system device: ${systemSpec}`);
+        }
+        // Allinea sempre i settings persistiti al valore risolto
+        if (systemSpec) {
+          try {
+            await this.saveSettings({ ffmpegSystemDevice: systemSpec, ffmpegSystemLabel: sysResolvedObj?.label || sysLabelSaved || "" });
+          } catch {}
+        }
+      }
+
+      return { format, micSpec, systemSpec };
     }
 
     if (format === "dshow") {
