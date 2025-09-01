@@ -61,6 +61,8 @@
   transition: color 0.2s ease;
 }
 
+/* Progress bar styles removed - no longer needed */
+
 .resonance-timer {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 20px;

@@ -226,9 +226,10 @@ export class LibraryModal extends Modal {
     });
     cb.checked = this.selected.has(it.audioPath);
 
-    const title = left.createEl("div", { cls: "resonance-title", text: it.baseName });
-    title.setAttr("title", it.audioPath);
-    left.createEl("div", { cls: "resonance-sub", text: `${date.toLocaleString()} • ${(it.sizeBytes/1024/1024).toFixed(2)} MB` });
+    const titleText = date.toLocaleString();
+    const title = left.createEl("div", { cls: "resonance-title", text: titleText });
+    title.setAttr("title", it.baseName);
+    left.createEl("div", { cls: "resonance-sub", text: `${(it.sizeBytes/1024/1024).toFixed(2)} MB` });
 
     const actions = row.createEl("div", { cls: "resonance-actions" });
     const playBtn = actions.createEl("button", { cls: "resonance-btn secondary" }); playBtn.appendChild(createIcon('play')); playBtn.appendText(' Listen');

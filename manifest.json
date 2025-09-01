@@ -3,7 +3,7 @@
   "name": "Resonance",
   "version": "0.0.2",
   "minAppVersion": "1.5.0",
-  "description": "Record meetings, lessons, interviews, and more. Transcribe locally, summarize with AI, and create notes in Obsidian. Free and open source.",
+  "description": "Record meetings, lectures, interviews, and more. Transcribe locally, summarize with AI, and create notes in Obsidian. Free and open source.",
   "author": "Michael Gorini",
   "authorUrl": "",
   "isDesktopOnly": true

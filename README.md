@@ -68,7 +68,7 @@ Artifacts are emitted to `dist/`.
 - **Whisper**: repo path, whisper‑cli path, model picker or auto‑download; transcription language (auto or ISO code).
 - **LLM**: Gemini API Key and model.
 - **Obsidian**: output folder for generated notes.
-- **Library & retention**: maximum recordings to keep (0 = infinite).
+- **Recording**: audio quality and library settings.
 
 ## How it works (overview)
 

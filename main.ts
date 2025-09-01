@@ -1,7 +1,6 @@
 import { App, Modal, Notice, Plugin } from "obsidian";
 import { ResonanceSettings, DEFAULT_SETTINGS, ResonanceSettingTab } from "./settings";
 import { checkDependencies } from "./DependencyChecker";
-// @ts-expect-error: module is resolved at runtime by the bundler
 import { RecorderService, type RecorderPhase } from "./RecorderService";
 import { PROMPT_PRESETS, DEFAULT_PROMPT_KEY, getPresetKeys } from "./prompts";
 import { autoDetectFfmpeg, autoDetectWhisperFromRepo } from "./AutoDetect";
@@ -20,6 +19,7 @@ export default class ResonancePlugin extends Plugin {
   private ribbonIconEl!: HTMLElement;
   private statusBarEl!: HTMLElement;
   private statusTimerId: number | null = null;
+
 
   async onload() {
     await this.loadSettings();
@@ -216,6 +216,8 @@ export default class ResonancePlugin extends Plugin {
     const ss = String(sec % 60).padStart(2, "0");
     this.statusBarEl.setText(`Rec ${mm}:${ss}`);
   }
+
+
 
   private selectPreset(defaultKey: string): Promise<string | null> {
     return new Promise<string | null>((resolve) => {

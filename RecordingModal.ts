@@ -24,6 +24,7 @@ export class RecordingModal extends Modal {
   // UI element refs for dynamic updates
   private statusEl!: HTMLElement;
   private timerEl!: HTMLElement;
+
   private controlBtn!: HTMLButtonElement;
   private cancelBtn!: HTMLButtonElement;
   private waveEl!: HTMLElement;
@@ -120,6 +121,8 @@ export class RecordingModal extends Modal {
     this.controlBtn.appendText(` ${label}`);
     this.controlBtn.disabled = !enabled;
   }
+
+
 
   private startTimer() {
     this.state.startTs = Date.now();
@@ -302,6 +305,15 @@ export class RecordingModal extends Modal {
     const transcript = stdoutBuf.join("").trim();
     if (!transcript) throw new Error("Empty transcription");
 
+    // Se troppo corto, mostra notice e termina senza Gemini
+    const compactLen = transcript.replace(/\s+/g, "").length;
+    if (compactLen < 150) {
+      new Notice("Transcription too short – summary skipped");
+      this.setPhase("done");
+      await this.cleanupTemp();
+      return;
+    }
+
     await this.summarizeFlow(transcript);
   }
 
@@ -432,3 +444,5 @@ async function waitChildClose(child: any, timeoutMs: number): Promise<boolean> {
     setTimeout(() => { if (!done) { done = true; try { child.off?.("close", onClose); } catch {} resolve(false); } }, timeoutMs);
   });
 }
+
+

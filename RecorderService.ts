@@ -1,4 +1,5 @@
 import { App, Notice, TFile } from "obsidian";
+import { scanDevices } from "./DeviceScanner";
 import type { ResonanceSettings } from "./settings";
 
 export type RecorderPhase = "idle" | "recording" | "transcribing" | "summarizing" | "error" | "done";
@@ -161,25 +162,52 @@ export class RecorderService {
     } catch {}
   }
 
-  private resolveFfmpegInput(): { format: string; micSpec?: string; systemSpec?: string } {
+  private async resolveFfmpegInput(): Promise<{ format: string; micSpec?: string; systemSpec?: string }> {
     const platform = process.platform;
     let format = this.settings.ffmpegInputFormat;
     if (format === "auto") {
       format = platform === "darwin" ? "avfoundation" : platform === "win32" ? "dshow" : "pulse";
     }
-    const mic = (this.settings.ffmpegMicDevice || "").trim();
-    const sys = (this.settings.ffmpegSystemDevice || "").trim();
-    // macOS: audio-only -> ":index" (not "index:")
-    if (format === "avfoundation") return { format, micSpec: mic || ":0", systemSpec: sys || "" };
+
+    const micSaved = (this.settings.ffmpegMicDevice || "").trim();
+    const sysSaved = (this.settings.ffmpegSystemDevice || "").trim();
+
+    if (format === "avfoundation") {
+      // Remap dinamico per macOS: risolve l'indice corrente in base alla label salvata
+      const ffmpeg = (this.settings.ffmpegPath || "").trim();
+      let micSpec = micSaved;
+      let systemSpec = sysSaved;
+      try {
+        if (ffmpeg) {
+          const list = await scanDevices(ffmpeg, 'avfoundation');
+          const audioList = list.filter(d => d.type === 'audio');
+
+          const normalize = (s: string) => (s || '').replace(/^[0-9]+:\s*/, '').trim();
+          const targetMicLabel = normalize(this.settings.ffmpegMicLabel || "");
+          const targetSysLabel = normalize(this.settings.ffmpegSystemLabel || "");
+
+          if (targetMicLabel) {
+            const found = audioList.find(d => normalize(d.label) === targetMicLabel);
+            if (found) micSpec = found.name; // es.: ":0"
+          }
+          if (targetSysLabel) {
+            const found2 = audioList.find(d => normalize(d.label) === targetSysLabel);
+            if (found2) systemSpec = found2.name;
+          }
+        }
+      } catch {}
+      return { format, micSpec: micSpec || ":0", systemSpec: systemSpec || "" };
+    }
+
     if (format === "dshow") {
       const ensureDshowPrefix = (v: string): string => {
         if (!v) return v;
         return /^(audio=|video=|@device_)/i.test(v) ? v : `audio=${v}`;
       };
-      const micName = mic || "audio=Microphone (default)";
-      return { format, micSpec: ensureDshowPrefix(micName), systemSpec: sys ? ensureDshowPrefix(sys) : "" };
+      const micName = micSaved || "audio=Microphone (default)";
+      return { format, micSpec: ensureDshowPrefix(micName), systemSpec: sysSaved ? ensureDshowPrefix(sysSaved) : "" };
     }
-    return { format, micSpec: mic || "default", systemSpec: sys || "" };
+    return { format, micSpec: micSaved || "default", systemSpec: sysSaved || "" };
   }
 
   private async beginRecording() {
@@ -188,15 +216,23 @@ export class RecorderService {
 
     const { spawn } = (window as any).require("child_process");
 
-    const { format, micSpec, systemSpec } = this.resolveFfmpegInput();
+    const { format, micSpec, systemSpec } = await this.resolveFfmpegInput();
     const inputs: string[] = [];
     if (micSpec) inputs.push("-f", format, "-i", micSpec);
     if (systemSpec) inputs.push("-f", format, "-i", systemSpec);
     if (inputs.length === 0) throw new Error("No FFmpeg input device configured. Set at least the microphone.");
 
     const shouldMix = Boolean(micSpec && systemSpec);
-    const mixArgs = shouldMix ? ["-filter_complex", "[0:a][1:a]amix=inputs=2:duration=longest"] : [];
-    const outputArgs = ["-acodec", "libmp3lame", "-ab", "192k", this.audioPath];
+    // Mix semplice senza filtri complessi per evitare problemi di sincronizzazione
+    const mixArgs = shouldMix ? [
+      "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=longest"
+    ] : [];
+    // Parametri conservativi per Mac
+    const sr = Math.max(8000, Number(this.settings.recordSampleRateHz || 48000));
+    const ch = Math.max(1, Math.min(2, Number(this.settings.recordChannels || 1)));
+    const br = Math.max(64, Number(this.settings.recordBitrateKbps || 192));
+    const audioFmtArgs = ["-ar", String(sr), "-ac", String(ch)];
+    const outputArgs = [...audioFmtArgs, "-acodec", "libmp3lame", "-ab", `${br}k`, this.audioPath];
 
     this.setPhase("recording");
     this.startElapsedTimer();
@@ -281,8 +317,17 @@ export class RecorderService {
     const transcript = stdoutBuf.join("").trim();
     if (!transcript) throw new Error("Empty transcription");
     try { fs.writeFileSync(this.transcriptPath, transcript, { encoding: "utf8" }); this.appendLog(`Transcription saved: ${this.transcriptPath} (${transcript.length} chars)`); } catch {}
-    this.onInfo?.(`Summarizing...`);
 
+    // Se la trascrizione è troppo corta, probabilmente c'è stato un problema audio → salta Gemini
+    const compactLen = transcript.replace(/\s+/g, "").length;
+    if (compactLen < 150) {
+      this.appendLog(`Transcription too short (${compactLen} chars). Skipping summarization.`);
+      this.onInfo?.("Transcription too short – summary skipped");
+      this.setPhase("done");
+      return;
+    }
+
+    this.onInfo?.(`Summarizing...`);
     await this.summarize(transcript);
   }
 
@@ -338,7 +383,7 @@ export class RecorderService {
       scenarioLabel = PROMPT_PRESETS[key]?.label || null;
     } catch {}
     const safe = (s: string) => s.replace(/[\\/:*?"<>|]/g, '-');
-    const fileName = scenarioLabel ? `Meeting (${safe(scenarioLabel)}) ${date}.md` : `Meeting ${date}.md`;
+    const fileName = scenarioLabel ? `${safe(scenarioLabel)} ${date}.md` : `Meeting ${date}.md`;
     const folder = this.settings.outputFolder?.trim();
     const fullPath = folder ? `${folder}/${fileName}` : fileName;
     const tfile = await this.app.vault.create(fullPath, markdown);

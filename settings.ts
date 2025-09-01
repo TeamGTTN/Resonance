@@ -9,7 +9,9 @@ export interface ResonanceSettings {
   ffmpegPath: string;
   ffmpegInputFormat: "auto" | "avfoundation" | "dshow" | "pulse" | "alsa";
   ffmpegMicDevice: string;
+  ffmpegMicLabel?: string; // human label for remapping (avfoundation)
   ffmpegSystemDevice: string;
+  ffmpegSystemLabel?: string; // human label for remapping (avfoundation)
   whisperRepoPath: string; // repo root path for whisper.cpp
   whisperMainPath: string; // whisper-cli resolved automatically from repo
   whisperModelPath: string;
@@ -18,15 +20,21 @@ export interface ResonanceSettings {
   outputFolder: string;
   lastPromptKey?: string;
   maxRecordingsKept: number; // 0 = infinite
+  // Recording quality
+  recordSampleRateHz?: number; // e.g., 48000
+  recordChannels?: number; // 1 or 2
+  recordBitrateKbps?: number; // e.g., 192
 }
 
 export const DEFAULT_SETTINGS: ResonanceSettings = {
   geminiApiKey: "",
-  geminiModel: "gemini-1.5-pro",
+  geminiModel: "gemini-2.5-pro",
   ffmpegPath: "",
   ffmpegInputFormat: "auto",
   ffmpegMicDevice: "",
+  ffmpegMicLabel: "",
   ffmpegSystemDevice: "",
+  ffmpegSystemLabel: "",
   whisperRepoPath: "",
   whisperMainPath: "",
   whisperModelPath: "",
@@ -34,7 +42,10 @@ export const DEFAULT_SETTINGS: ResonanceSettings = {
   whisperLanguage: "auto",
   outputFolder: "",
   lastPromptKey: undefined,
-  maxRecordingsKept: 20,
+  maxRecordingsKept: 5,
+  recordSampleRateHz: 44100,
+  recordChannels: 2,
+  recordBitrateKbps: 160,
 };
 
 export class ResonanceSettingTab extends PluginSettingTab {
@@ -257,8 +268,14 @@ export class ResonanceSettingTab extends PluginSettingTab {
       .addButton((btn) => btn.setButtonText("Test audio config").onClick(async () => { await this.quickTestRecording(); }));
 
     await this.performScanAndPopulate(micSelect, sysSelect).catch(()=>{});
-    micSelect.addEventListener('change', async () => { await this.save({ ffmpegMicDevice: micSelect.value }); });
-    sysSelect.addEventListener('change', async () => { await this.save({ ffmpegSystemDevice: sysSelect.value }); });
+    micSelect.addEventListener('change', async () => {
+      const selected = micSelect.options[micSelect.selectedIndex];
+      await this.save({ ffmpegMicDevice: selected.value, ffmpegMicLabel: selected.text });
+    });
+    sysSelect.addEventListener('change', async () => {
+      const selected = sysSelect.options[sysSelect.selectedIndex];
+      await this.save({ ffmpegSystemDevice: selected.value, ffmpegSystemLabel: selected.text });
+    });
 
     // STEP 5: Obsidian
     containerEl.createEl("h3", { text: "Obsidian" });
@@ -269,8 +286,45 @@ export class ResonanceSettingTab extends PluginSettingTab {
       .setDesc("Example: Meeting Notes, if empty, root of the vault.")
       .addText(text => text.setPlaceholder("Meeting Notes").setValue(this.settings.outputFolder).onChange(async (value) => { await this.save({ outputFolder: value.trim() }); }));
 
-    // STEP 6: Library & retention
-    containerEl.createEl("h3", { text: "Library & retention" });
+    // STEP 6: Recording
+    containerEl.createEl("h3", { text: "Recording" });
+
+    new Setting(containerEl)
+      .setName("Sample rate (Hz)")
+      .setDesc("Typical: 44100 or 48000")
+      .addText((text) =>
+        text
+          .setPlaceholder("48000")
+          .setValue(String(this.settings.recordSampleRateHz || 48000))
+          .onChange(async (value) => {
+            const v = Math.max(8000, Math.min(192000, Math.floor(Number(value || 48000))));
+            await this.save({ recordSampleRateHz: v });
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Channels")
+      .setDesc("1 = mono, 2 = stereo")
+      .addDropdown((drop) => {
+        drop.addOption("1", "Mono (1)");
+        drop.addOption("2", "Stereo (2)");
+        const ch = (this.settings.recordChannels || 1);
+        drop.setValue(String(ch === 2 ? 2 : 1));
+        drop.onChange(async (value) => { await this.save({ recordChannels: Number(value) }); });
+      });
+
+    new Setting(containerEl)
+      .setName("Bitrate (kbps)")
+      .setDesc("MP3 bitrate. Typical: 160 – 256")
+      .addText((text) =>
+        text
+          .setPlaceholder("192")
+          .setValue(String(this.settings.recordBitrateKbps || 192))
+          .onChange(async (value) => {
+            const v = Math.max(64, Math.min(512, Math.floor(Number(value || 192))));
+            await this.save({ recordBitrateKbps: v });
+          })
+      );
     new Setting(containerEl)
       .setName("Max recordings kept")
       .setDesc("0 = infinite, older ones will be deleted automatically.")
@@ -326,17 +380,32 @@ export class ResonanceSettingTab extends PluginSettingTab {
     });
 
     const availableMicValues = new Set(Array.from(micSelect.options).map(o => o.value));
-    if (this.settings.ffmpegMicDevice && availableMicValues.has(this.settings.ffmpegMicDevice)) {
-      micSelect.value = this.settings.ffmpegMicDevice;
-    } else if (micSelect.options.length > 0) {
+    // Prova remap per avfoundation: se label salvata esiste, riassegna nuovo indice dinamico
+    const currentMicLabel = (this.settings.ffmpegMicLabel || '').replace(/^\d+:\s*/, '');
+    if (this.settings.ffmpegInputFormat === 'avfoundation' && currentMicLabel) {
+      const candidate = Array.from(micSelect.options).find(o => o.text.replace(/^\d+:\s*/, '') === currentMicLabel);
+      if (candidate) {
+        micSelect.value = candidate.value;
+        await this.save({ ffmpegMicDevice: candidate.value });
+      }
+    }
+    if (!micSelect.value && micSelect.options.length > 0) {
       micSelect.selectedIndex = 0;
-      await this.save({ ffmpegMicDevice: micSelect.value });
+      await this.save({ ffmpegMicDevice: micSelect.value, ffmpegMicLabel: micSelect.options[micSelect.selectedIndex].text });
       new Notice(`Microphone auto-selected: ${micSelect.options[micSelect.selectedIndex].text}`);
     }
 
     const availableSysValues = new Set(Array.from(sysSelect.options).map(o => o.value));
     if (this.settings.ffmpegSystemDevice && availableSysValues.has(this.settings.ffmpegSystemDevice)) {
       sysSelect.value = this.settings.ffmpegSystemDevice;
+    }
+    const currentSysLabel = (this.settings.ffmpegSystemLabel || '').replace(/^\d+:\s*/, '');
+    if (this.settings.ffmpegInputFormat === 'avfoundation' && currentSysLabel) {
+      const candidate2 = Array.from(sysSelect.options).find(o => o.text.replace(/^\d+:\s*/, '') === currentSysLabel);
+      if (candidate2) {
+        sysSelect.value = candidate2.value;
+        await this.save({ ffmpegSystemDevice: candidate2.value });
+      }
     }
   }
 
@@ -457,7 +526,10 @@ export class ResonanceSettingTab extends PluginSettingTab {
 
     const normalize = (b: string, v: string) => b === 'dshow' && !/^(audio=|video=|@device_)/i.test(v) ? `audio=${v}` : v;
     const micArg = normalize(backend, mic);
-    const args: string[] = ['-y', '-f', backend, '-i', micArg, '-t', '1', '-acodec', 'libmp3lame', '-ab', '128k', out];
+    const sr = Math.max(8000, Number(this.settings.recordSampleRateHz || 48000));
+    const ch = Math.max(1, Math.min(2, Number(this.settings.recordChannels || 1)));
+    const br = Math.max(64, Number(this.settings.recordBitrateKbps || 160));
+    const args: string[] = ['-y', '-f', backend, '-i', micArg, '-t', '1', '-ar', String(sr), '-ac', String(ch), '-acodec', 'libmp3lame', '-ab', `${br}k`, out];
     const child = spawn(ffmpeg, args);
 
     let stderr = '';
