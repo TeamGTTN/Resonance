@@ -15,15 +15,24 @@
   </p>
   <p>
     <a href="#installation">Installation</a> ·
+    <a href="#configuration">Configuration</a> ·
     <a href="#usage">Usage</a> ·
     <a href="#settings">Settings</a> ·
     <a href="#troubleshooting">Troubleshooting</a>
+  </p>
+  <p>
+    <a href="https://github.com/TeamGTTN/Resonance" target="_blank" rel="noopener">
+      <img alt="GitHub Repo" src="https://img.shields.io/badge/GitHub-Resonance-black?logo=github" />
+    </a>
+    <a href="https://buymeacoffee.com/michaelgorini" target="_blank" rel="noopener">
+      <img alt="Donate" src="https://img.shields.io/badge/Donate-Buy%20me%20a%20coffee-yellow" />
+    </a>
   </p>
 </div>
 
 ## What it does
 
-Resonance captures audio with FFmpeg, transcribes it locally using whisper.cpp, summarizes the transcript with Google Gemini, and creates a Markdown note in your vault — all from Obsidian.
+Resonance captures audio with FFmpeg, transcribes it locally using whisper.cpp, summarizes the transcript with Google Gemini, and creates a Markdown note in your vault, all from Obsidian.
 
 ## Features
 
@@ -50,16 +59,118 @@ User install from release:
 From source (developers):
 ```bash
 npm install
-npm run dev   # watch build
-npm run build # production build (outputs to dist/)
+npm run build
 ```
 Artifacts are emitted to `dist/`.
+
+## Configuration
+
+Follow these steps once to fully set up recording, local transcription and summarization.
+
+### 1) FFmpeg
+
+- macOS:
+  - Install with Homebrew: `brew install ffmpeg`
+  - Typical path: `/opt/homebrew/bin/ffmpeg` (Apple Silicon) or `/usr/local/bin/ffmpeg` (Intel)
+- Windows:
+  - Download a static build (e.g. from the BtbN or Gyan packages)
+  - Unzip to `C:/ffmpeg/` so the executable is at `C:/ffmpeg/bin/ffmpeg.exe`
+  - Optionally add `C:/ffmpeg/bin` to PATH, or set the full path in settings
+- Linux:
+  - Install via your package manager, e.g. Debian/Ubuntu: `sudo apt install ffmpeg`, Fedora: `sudo dnf install ffmpeg`
+
+In Obsidian → Resonance → FFmpeg:
+- Set “FFmpeg path” or click “Detect”. On macOS you may need to grant microphone permissions to Obsidian.
+
+### 2) whisper.cpp (local transcription)
+
+Clone and build the project, then select the `whisper-cli` binary.
+
+- macOS/Linux (generic):
+```bash
+git clone https://github.com/ggerganov/whisper.cpp
+cd whisper.cpp
+cmake -S . -B build
+cmake --build build -j
+```
+  - The executable is typically at `build/bin/whisper-cli`
+- Windows (CMake + MSVC):
+  - Install CMake and Visual Studio Build Tools
+  - From a Developer PowerShell:
+```powershell
+git clone https://github.com/ggerganov/whisper.cpp
+cd whisper.cpp
+cmake -S . -B build -A x64
+cmake --build build --config Release
+```
+  - The executable is typically at `build/bin/Release/whisper-cli.exe`
+
+In Obsidian → Resonance → Whisper:
+- Set “whisper.cpp repo path”, then click “Detect” to auto‑find `whisper-cli`, or set it manually.
+- Pick a model preset and click “Download”, or set a model `.bin` path manually.
+- Choose the “Transcription language” (or leave Automatic).
+
+Models (manual download): see the official ggml models, e.g. small/medium/large. Place the `.bin` in `<repo>/models/` and select it in settings.
+
+### 3) LLM (Gemini)
+
+- Create an API key from Google AI Studio.
+- In Obsidian → Resonance → LLM: paste the key and pick the model (`gemini-1.5-pro`, `gemini-2.5-flash`, or `gemini-2.5-pro`).
+
+Only the text transcript is sent to Gemini. Audio stays local.
+
+### 4) Audio devices (mic and system audio)
+
+Select the proper backend for your OS and pick devices from the scanned list.
+
+- Backend:
+  - macOS: `avfoundation`
+  - Windows: `dshow`
+  - Linux: `pulse` (or `alsa`)
+  - “Automatic” chooses based on OS
+
+- macOS system audio:
+  - Install a virtual loopback driver (e.g. BlackHole 2ch)
+  - Route system output to that device (or create a Multi‑Output/aggregate device if needed)
+  - Click “Refresh devices”, then select your mic and the virtual device as “System audio”
+
+- Windows system audio:
+  - Install VB‑Audio Cable or VoiceMeeter
+  - Set Windows output to the virtual device (or use “Stereo Mix” if available)
+  - Click “Refresh devices”, pick mic and the virtual device for “System audio”
+
+- Linux system audio:
+  - With PulseAudio, choose the monitor of your output sink (e.g. `alsa_output.*.monitor`)
+  - Click “Refresh devices”, then select mic and the monitor device
+
+Use “Test audio config” to record a 1‑second MP3. If it fails, verify permissions, backend, and selected devices.
+
+### 5) Obsidian output
+
+- Set the “Notes folder” where Resonance will create the generated Markdown notes. If empty, the vault root is used.
+
+### 6) Recording quality and limits
+
+- Adjust sample rate, channels (mono/stereo), MP3 bitrate, and “Max recordings kept”. Older items beyond the limit are auto‑deleted (0 = infinite).
+
+### 7) Done!
+
+- You may need to restart Obsidian after changing settings.
+
+### First run checklist
+
+- FFmpeg path set and working (test passes)
+- Whisper repo path + `whisper-cli` set
+- Model `.bin` selected (or downloaded)
+- Gemini API key and model set
+- Mic and (optional) system audio selected
+- Notes folder set
 
 ## Usage
 
 1) Click the microphone icon in the ribbon to start/stop. Pick a scenario when prompted.  
 2) Watch the timer in the status bar.  
-3) When finished, a note named `Meeting YYYY-MM-DD HH-mm.md` is created in your selected folder.  
+3) When finished, a note named `<Scenario> YYYY-MM-DD HH-mm.md` is created in your selected folder.  
 4) Open the Library (audio file icon) to browse, listen, download or delete recordings and transcripts.
 
 ## Settings
@@ -85,8 +196,9 @@ Artifacts are emitted to `dist/`.
 
 ## Troubleshooting
 
-- “Incomplete configuration”: set FFmpeg path, whisper main, model, and API key.
+- Incomplete configuration: set FFmpeg path, whisper main, model, and API key.
 - No audio: verify backend/device; use Scan and the 3‑second Test.
+- Noise in recordings: match the sample rate in settings with your mic.
 - Empty transcription: check the `.mp3` file and the model path.
 - Gemini error: verify API key and selected model.
 

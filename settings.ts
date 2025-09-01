@@ -87,6 +87,12 @@ export class ResonanceSettingTab extends PluginSettingTab {
       text: "When finished, a note will be created in the Notes folder you've selected. You can also open the Library (audio file icon) to listen, copy the transcription, or manage recordings."
     });
 
+    // Project quick links (top)
+    const projectLinks = new Setting(containerEl)
+    projectLinks.addButton((btn)=> btn.setButtonText("GitHub Repo").onClick(()=>{
+      try { const electron = (window as any).require('electron'); electron?.shell?.openExternal?.('https://github.com/TeamGTTN/Resonance'); } catch {}
+    }));
+
     // STEP 1: FFmpeg
     containerEl.createEl("h3", { text: "FFmpeg" });
     containerEl.createEl("p", { text: "Used to capture audio from your microphone and system audio." });

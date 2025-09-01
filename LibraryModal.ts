@@ -147,7 +147,15 @@ export class LibraryModal extends Modal {
   private toggleSelectAll(checked: boolean) {
     const paths = this.visibleItems.map(it => it.audioPath);
     if (checked) paths.forEach(p => this.selected.add(p)); else paths.forEach(p => this.selected.delete(p));
-    this.render();
+    // Non ricreare tutta la lista per non perdere stato; aggiorna checkbox visibili e toolbar
+    const checkboxes = Array.from(this.listEl.querySelectorAll('input[type="checkbox"]')) as HTMLInputElement[];
+    const pathByRow: string[] = this.visibleItems.map(it => it.audioPath);
+    for (let i = 0, j = 0; i < checkboxes.length && j < pathByRow.length; i++) {
+      const cb = checkboxes[i];
+      // Solo i checkbox delle righe (salta eventuali altri input)
+      if (cb.type === 'checkbox') { cb.checked = this.selected.has(pathByRow[j++]); }
+    }
+    this.updateToolbarSelectionState();
   }
 
   private async deleteSelected() {
