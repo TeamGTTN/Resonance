@@ -529,7 +529,9 @@ export class ResonanceSettingTab extends PluginSettingTab {
     const sr = Math.max(8000, Number(this.settings.recordSampleRateHz || 48000));
     const ch = Math.max(1, Math.min(2, Number(this.settings.recordChannels || 1)));
     const br = Math.max(64, Number(this.settings.recordBitrateKbps || 160));
-    const args: string[] = ['-y', '-f', backend, '-i', micArg, '-t', '1', '-ar', String(sr), '-ac', String(ch), '-acodec', 'libmp3lame', '-ab', `${br}k`, out];
+    const args: string[] = backend === 'avfoundation'
+      ? ['-y', '-f', backend, '-thread_queue_size', '1024', '-i', micArg, '-t', '1', '-vn', '-ar', String(sr), '-ac', String(ch), '-acodec', 'libmp3lame', '-ab', `${br}k`, out]
+      : ['-y', '-f', backend, '-thread_queue_size', '1024', '-ar', String(sr), '-ac', String(ch), '-i', micArg, '-t', '1', '-vn', '-ar', String(sr), '-ac', String(ch), '-acodec', 'libmp3lame', '-ab', `${br}k`, out];
     const child = spawn(ffmpeg, args);
 
     let stderr = '';

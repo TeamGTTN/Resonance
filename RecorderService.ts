@@ -270,8 +270,15 @@ export class RecorderService {
 
     const { format, micSpec, systemSpec } = await this.resolveFfmpegInput();
     const inputs: string[] = [];
-    if (micSpec) inputs.push("-f", format, "-i", micSpec);
-    if (systemSpec) inputs.push("-f", format, "-i", systemSpec);
+    const sr = Math.max(8000, Number(this.settings.recordSampleRateHz || 48000));
+    const ch = Math.max(1, Math.min(2, Number(this.settings.recordChannels || 1)));
+    const buildInputArgs = (spec: string): string[] => {
+      // Per avfoundation (macOS) -ar/-ac per-input generano errore (Option sample_rate not found).
+      // Manteniamo solo -thread_queue_size a livello di input e forziamo formato in uscita.
+      return ["-f", format, "-thread_queue_size", "1024", "-i", spec];
+    };
+    if (micSpec) inputs.push(...buildInputArgs(micSpec));
+    if (systemSpec) inputs.push(...buildInputArgs(systemSpec));
     if (inputs.length === 0) throw new Error("No FFmpeg input device configured. Set at least the microphone.");
 
     const shouldMix = Boolean(micSpec && systemSpec);
@@ -279,11 +286,8 @@ export class RecorderService {
     const mixArgs = shouldMix ? [
       "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=longest"
     ] : [];
-    // Parametri conservativi per Mac
-    const sr = Math.max(8000, Number(this.settings.recordSampleRateHz || 48000));
-    const ch = Math.max(1, Math.min(2, Number(this.settings.recordChannels || 1)));
     const br = Math.max(64, Number(this.settings.recordBitrateKbps || 192));
-    const audioFmtArgs = ["-ar", String(sr), "-ac", String(ch)];
+    const audioFmtArgs = ["-vn", "-ar", String(sr), "-ac", String(ch)];
     const outputArgs = [...audioFmtArgs, "-acodec", "libmp3lame", "-ab", `${br}k`, this.audioPath];
 
     this.setPhase("recording");
