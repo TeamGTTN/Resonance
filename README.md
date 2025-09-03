@@ -32,14 +32,13 @@
 
 ## What it does
 
-Resonance captures audio with FFmpeg, transcribes it locally using whisper.cpp, summarizes the transcript with Google Gemini, and creates a Markdown note in your vault, all from Obsidian.
+Resonance captures audio with FFmpeg, transcribes it locally using whisper.cpp, summarizes the transcript with the LLM of your choice, and creates a Markdown note in your vault, all from Obsidian.
 
 ## Features
 
-- 🎙️ Record microphone and optionally system audio (depends on OS setup)
+- 🎙️ Record microphone and optionally system audio
 - 🧠 Local transcription via whisper.cpp
-- ✨ AI summary via Google Gemini
-- ⏱️ Status‑bar timer and ribbon shortcuts
+- ✨ AI summary (Gemini, OpenAI, Claude, Ollama)
 - 📚 Library to review, play, download or delete recordings/transcripts
 
 ## Requirements
@@ -49,19 +48,12 @@ Resonance captures audio with FFmpeg, transcribes it locally using whisper.cpp, 
 - whisper.cpp built locally (binary and model .bin)
 - LLM API Key or local Ollama (for summaries)
 
-## Installation
+## Manual Installation
 
 User install from release:
 1) Download the zip containing `manifest.json`, `main.js`, `styles.css`.
 2) Create `<YourVault>/.obsidian/plugins/resonance/`.
 3) Copy the three files there and enable the plugin in Obsidian.
-
-From source (developers):
-```bash
-npm install
-npm run build
-```
-Artifacts are emitted to `dist/`.
 
 ## Configuration
 
@@ -117,7 +109,16 @@ Models (manual download): see the official ggml models, e.g. small/medium/large.
 - Create an API key from Google AI Studio or the LLM of your choice.
 - In Obsidian → Resonance → LLM: paste the key and pick the model.
 
-Only the text transcript is sent to the LLM. Audio stays local.
+If you want **everything to run locally** (without sending any data to external services), you can use [Ollama](https://ollama.com/) as your LLM provider:
+
+- Install Ollama following the official instructions for your operating system.
+- Start Ollama (`ollama serve`).
+- In Obsidian → Resonance → LLM:
+  - Set the provider to "Ollama"
+  - Enter the endpoint (default: `http://localhost:11434`)
+  - Choose a supported model (e.g. `llama3.1` or others available via `ollama pull <model>`)
+
+**Note:** With this setup, both transcription (whisper.cpp) and note generation (LLM) are performed entirely on your computer, with no data sent externally.
 
 ### 4) Audio devices (mic and system audio)
 
