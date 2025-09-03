@@ -98,7 +98,7 @@ export class HelpModal extends Modal {
         ];
       case 'llm':
         return [
-          { title: 'Gemini', paragraphs: ['Create an API Key in Google AI Studio and paste it in Settings. Select the model you prefer. The free version should be enough for personal use.'] },
+          { title: 'API Key', paragraphs: ['Create an API Key (Google AI Studio or other) and paste it in Settings. Select the model you prefer.'] },
           { title: 'Privacy', paragraphs: ['Only the text transcript is sent to the service for summarization, audio stays local.'] },
         ];
       case 'devices':

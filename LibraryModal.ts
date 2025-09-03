@@ -239,14 +239,15 @@ export class LibraryModal extends Modal {
     title.setAttr("title", it.baseName);
     left.createEl("div", { cls: "resonance-sub", text: `${(it.sizeBytes/1024/1024).toFixed(2)} MB` });
 
+    // Solo 2 pulsanti principali: Listen e More
     const actions = row.createEl("div", { cls: "resonance-actions" });
-    const playBtn = actions.createEl("button", { cls: "resonance-btn secondary" }); playBtn.appendChild(createIcon('play')); playBtn.appendText(' Listen');
-    const openTrBtn = actions.createEl("button", { cls: "resonance-btn secondary" }); openTrBtn.appendChild(createIcon('file-text')); openTrBtn.appendText(' Open transcript');
-    const dlAudio = actions.createEl("button", { cls: "resonance-btn secondary" }); dlAudio.appendChild(createIcon('download')); dlAudio.appendText(' Download audio');
-    const dlTxt = actions.createEl("button", { cls: "resonance-btn secondary" }); dlTxt.appendChild(createIcon('download')); dlTxt.appendText(' Download text');
-    const showBtn = actions.createEl("button", { cls: "resonance-btn secondary" }); showBtn.appendChild(createIcon('folder')); showBtn.appendText(' Show in folder');
-    const openNoteBtn = actions.createEl("button", { cls: "resonance-btn secondary" }); openNoteBtn.appendChild(createIcon('note')); openNoteBtn.appendText(' Open note');
-    const delBtn = actions.createEl("button", { cls: "resonance-btn danger" }); delBtn.appendChild(createIcon('trash')); delBtn.appendText(' Delete');
+    const playBtn = actions.createEl("button", { cls: "resonance-btn secondary" }); 
+    playBtn.appendChild(createIcon('play')); 
+    playBtn.appendText(' Listen');
+    
+    const moreBtn = actions.createEl("button", { cls: "resonance-btn secondary" }); 
+    moreBtn.appendChild(createIcon('menu')); 
+    moreBtn.appendText(' More');
 
     const audioWrap = this.listEl.createEl("div", { cls: "resonance-audio-wrap" });
     audioWrap.hide();
@@ -262,56 +263,208 @@ export class LibraryModal extends Modal {
       }
     });
 
-    openTrBtn.addEventListener("click", async () => {
-      const text = await this.readTextSafe(it.transcriptPath);
-      if (!text) { new Notice("Transcript not found"); return; }
-      const sub = new TextPreviewModal(this.app, it.baseName, text);
-      sub.open();
-    });
+    // Menu dropdown per "More"
+    moreBtn.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      
+      // Rimuovi eventuali menu aperti
+      document.querySelectorAll('.resonance-menu').forEach(m => m.remove());
+      
+      const menu = document.createElement('div');
+      menu.className = 'resonance-menu';
+      
+      const addEntry = (label: string, icon: IconName, onClick: () => void) => {
+        const item = document.createElement('button');
+        item.className = 'resonance-menu-item';
+        item.appendChild(createIcon(icon));
+        item.appendChild(document.createTextNode(` ${label}`));
+        item.addEventListener('click', () => { 
+          menu.remove(); 
+          try { onClick(); } catch (e: any) { 
+            new Notice(`Error: ${e?.message ?? e}`); 
+          }
+        });
+        menu.appendChild(item);
+      };
 
-    // Note opener (from log)
-    (async () => {
+      // Voci del menu
+      addEntry('Open transcript', 'file-text', async () => {
+        const text = await this.readTextSafe(it.transcriptPath);
+        if (!text) { new Notice('Transcript not found'); return; }
+        const sub = new TextPreviewModal(this.app, it.baseName, text);
+        sub.open();
+      });
+
+      addEntry('Download audio', 'download', async () => {
+        await this.downloadFile(it.audioPath, `${it.baseName}.mp3`, 'audio/mpeg');
+      });
+
+      addEntry('Download text', 'download', async () => {
+        await this.downloadFile(it.transcriptPath, `${it.baseName}.txt`, 'text/plain;charset=utf-8');
+      });
+
+      addEntry('Show in folder', 'folder', () => {
+        try {
+          const electron = (window as any).require('electron');
+          electron?.shell?.showItemInFolder?.(it.audioPath);
+        } catch {}
+      });
+
+      // Apri nota se disponibile
       const notePath = await this.findNoteFromLog(it.logPath);
-      if (!notePath) {
-        openNoteBtn.disabled = true;
-        openNoteBtn.setAttr("title", "No note reference found in log");
+      if (notePath) {
+        addEntry('Open note', 'note', async () => {
+          try {
+            const file = this.app.vault.getAbstractFileByPath(notePath);
+            if (file && (file as any).extension === 'md') {
+              const leaf = this.app.workspace.getLeaf(true);
+              await leaf.openFile(file as TFile);
+            } else {
+              new Notice('Note not found in vault');
+            }
+          } catch { new Notice('Failed to open note'); }
+        });
+      }
+
+      // Divider
+      const divider = document.createElement('div');
+      divider.style.height = '1px';
+      divider.style.background = 'var(--background-modifier-border)';
+      divider.style.margin = '8px 6px';
+      menu.appendChild(divider);
+
+      addEntry('Regenerate transcript', 'refresh', async () => {
+        await this.regenerateTranscript(it);
+      });
+
+      addEntry('Regenerate summary', 'refresh', async () => {
+        await this.regenerateSummary(it);
+      });
+
+      // Divider
+      const divider2 = document.createElement('div');
+      divider2.style.height = '1px';
+      divider2.style.background = 'var(--background-modifier-border)';
+      divider2.style.margin = '8px 6px';
+      menu.appendChild(divider2);
+
+      addEntry('Delete', 'trash', async () => {
+        const ok = confirm('Delete this recording and related files?');
+        if (!ok) return;
+        const fs = (window as any).require('fs');
+        try { 
+          fs.unlinkSync(it.audioPath);
+          try { fs.unlinkSync(it.transcriptPath); } catch {}
+          try { fs.unlinkSync(it.logPath); } catch {}
+          new Notice('Deleted'); 
+        } catch (e: any) { 
+          new Notice(`Delete error: ${e?.message ?? e}`); 
+        }
+        await this.refresh();
+      });
+
+      // Posiziona e mostra il menu
+      document.body.appendChild(menu);
+      const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+      menu.style.position = 'fixed';
+      menu.style.top = `${rect.bottom + 4}px`;
+      menu.style.left = `${rect.left}px`;
+      menu.style.zIndex = '10000';
+
+      // Gestione chiusura menu
+      const closeMenu = (e: Event) => {
+        if (!menu.contains(e.target as Node)) {
+          menu.remove();
+          document.removeEventListener('click', closeMenu, true);
+          document.removeEventListener('keydown', handleKeydown, true);
+        }
+      };
+
+      const handleKeydown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          menu.remove();
+          document.removeEventListener('click', closeMenu, true);
+          document.removeEventListener('keydown', handleKeydown, true);
+        }
+      };
+
+      // Aggiungi gestori eventi dopo un tick per evitare chiusura immediata
+      setTimeout(() => {
+        document.addEventListener('click', closeMenu, true);
+        document.addEventListener('keydown', handleKeydown, true);
+      }, 0);
+    });
+  }
+
+  private async regenerateTranscript(it: LibraryItem) {
+    const fs = (window as any).require('fs');
+    if (!fs.existsSync(it.audioPath)) { new Notice('Audio not found'); return; }
+    try {
+      const path = (window as any).require('path');
+      const plugin = (this.app as any).plugins.getPlugin(this.pluginId);
+      if (!plugin) { new Notice('Plugin not available'); return; }
+      const settings = plugin.settings as any;
+      const { spawn } = (window as any).require('child_process');
+      const args = ['-m', settings.whisperModelPath, '-f', it.audioPath];
+      const lang = (settings.whisperLanguage || 'auto').trim(); if (lang && lang !== 'auto') args.push('-l', lang);
+      const child = spawn(settings.whisperMainPath, args, { cwd: path.dirname(it.audioPath) });
+      const out: string[] = []; let err="";
+      await new Promise<void>((resolve, reject)=>{
+        child.stdout?.on('data', (d: Buffer)=> out.push(d.toString()));
+        child.stderr?.on('data', (d: Buffer)=> { err += d.toString(); });
+        child.on('error', reject);
+        child.on('close', (code: number)=> code===0? resolve() : reject(new Error(`whisper-cli exited with ${code}: ${err}`)));
+      });
+      const text = out.join('').trim();
+      if (!text) throw new Error('Empty transcription');
+      fs.writeFileSync(it.transcriptPath, text, { encoding: 'utf8' });
+      new Notice('Transcript regenerated');
+    } catch (e: any) {
+      new Notice(`Regenerate failed: ${e?.message ?? e}`);
+    }
+  }
+
+  private async regenerateSummary(it: LibraryItem) {
+    const fs = (window as any).require('fs');
+    if (!fs.existsSync(it.transcriptPath)) { new Notice('Transcript not found'); return; }
+    try {
+      const transcript: string = fs.readFileSync(it.transcriptPath, { encoding: 'utf8' });
+      const plugin = (this.app as any).plugins.getPlugin(this.pluginId);
+      if (!plugin) { new Notice('Plugin not available'); return; }
+      const settings = plugin.settings as any;
+      const { PROMPT_PRESETS, DEFAULT_PROMPT_KEY } = await import('./prompts');
+      const { summarizeWithLLM } = await import('./llm');
+      const { normalizeCheckboxes } = await import('./markdown');
+      const preset = PROMPT_PRESETS[settings.lastPromptKey || DEFAULT_PROMPT_KEY] || PROMPT_PRESETS[DEFAULT_PROMPT_KEY];
+      const provider = settings.llmProvider || 'gemini';
+      const cfg: any = provider === 'openai' ? { provider, apiKey: settings.openaiApiKey, model: settings.openaiModel || 'gpt-4o-mini' }
+        : provider === 'anthropic' ? { provider, apiKey: settings.anthropicApiKey, model: settings.anthropicModel || 'claude-3-5-sonnet-latest' }
+        : provider === 'ollama' ? { provider, model: settings.ollamaModel || 'llama3.1', endpoint: settings.ollamaEndpoint || 'http://localhost:11434' }
+        : { provider: 'gemini', apiKey: settings.geminiApiKey, model: settings.geminiModel || 'gemini-2.5-pro' };
+      const expectedLang = (settings.whisperLanguage || 'auto');
+      const { detectLanguageFromTranscript } = await import('./llm');
+      const detectedLang = expectedLang === 'auto' ? detectLanguageFromTranscript(transcript) : expectedLang;
+      console.log(`[Resonance] Regenerating summary with ${provider}, language setting: ${expectedLang}, effective: ${detectedLang}`);
+      const raw = await summarizeWithLLM(cfg, preset.prompt, transcript, expectedLang);
+      const summary = normalizeCheckboxes(raw || '');
+      if (!summary.trim()) {
+        new Notice('Summary skipped: empty output from LLM');
         return;
       }
-      openNoteBtn.addEventListener("click", async () => {
-        try {
-          const file = this.app.vault.getAbstractFileByPath(notePath);
-          if (file && (file as any).extension === 'md') {
-            const leaf = this.app.workspace.getLeaf(true);
-            await leaf.openFile(file as TFile);
-          } else {
-            new Notice("Note not found in vault");
-          }
-        } catch { new Notice("Failed to open note"); }
-      });
-    })();
-
-    dlAudio.addEventListener("click", async () => {
-      await this.downloadFile(it.audioPath, `${it.baseName}.mp3`, "audio/mpeg");
-    });
-    dlTxt.addEventListener("click", async () => {
-      await this.downloadFile(it.transcriptPath, `${it.baseName}.txt`, "text/plain;charset=utf-8");
-    });
-
-    showBtn.addEventListener("click", () => {
-      try {
-        const electron = (window as any).require("electron");
-        electron?.shell?.showItemInFolder?.(it.audioPath);
-      } catch {}
-    });
-
-    delBtn.addEventListener("click", async () => {
-      const ok = confirm("Delete this recording and related files?");
-      if (!ok) return;
-      const fs = (window as any).require("fs");
-      try { try { fs.unlinkSync(it.audioPath); } catch {}; try { fs.unlinkSync(it.transcriptPath); } catch {}; try { fs.unlinkSync(it.logPath); } catch {}; new Notice("Deleted"); }
-      catch (e: any) { new Notice(`Delete error: ${e?.message ?? e}`); }
-      await this.refresh();
-    });
+      // Create new note
+      const date = (window as any).moment().format('YYYY-MM-DD HH-mm');
+      const safe = (s: string) => s.replace(/[\\/:*?"<>|]/g, '-');
+      const scenarioLabel = preset?.label || 'Meeting';
+      const fileName = `${safe(scenarioLabel)} ${date} (regenerated).md`;
+      const folder = (settings.outputFolder || '').trim();
+      const fullPath = folder ? `${folder}/${fileName}` : fileName;
+      const tfile = await this.app.vault.create(fullPath, summary);
+      new Notice('Summary regenerated');
+      const leaf = this.app.workspace.getLeaf(true);
+      await leaf.openFile(tfile as TFile);
+    } catch (e: any) {
+      new Notice(`Regenerate failed: ${e?.message ?? e}`);
+    }
   }
 
   private async readTextSafe(filePath: string): Promise<string | null> {
@@ -391,7 +544,7 @@ class TextPreviewModal extends Modal {
   }
 }
 
-type IconName = 'play' | 'file-text' | 'download' | 'folder' | 'note' | 'trash' | 'refresh';
+type IconName = 'play' | 'file-text' | 'download' | 'folder' | 'note' | 'trash' | 'refresh' | 'menu';
 function createIcon(name: IconName): HTMLElement {
   const span = document.createElement('span');
   span.addClass('resonance-icon');
@@ -402,6 +555,7 @@ function createIcon(name: IconName): HTMLElement {
     name === 'folder' ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M10 4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg>' :
     name === 'note' ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M4 4h14l2 2v14H4z"/><path d="M8 12h8" stroke="currentColor" stroke-width="2"/><path d="M8 16h6" stroke="currentColor" stroke-width="2"/></svg>' :
     name === 'trash' ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M3 6h18" stroke="currentColor" stroke-width="2"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>' :
+    name === 'menu' ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M4 6h16" stroke="currentColor" stroke-width="2"/><path d="M4 12h16" stroke="currentColor" stroke-width="2"/><path d="M4 18h16" stroke="currentColor" stroke-width="2"/></svg>' :
     /* refresh */ '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 13a8.1 8.1 0 0 0 15.5 2"/><path d="M4 4v5h5"/><path d="M20 20v-5h-5"/></svg>';
   return span;
 }

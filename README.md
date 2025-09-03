@@ -47,7 +47,7 @@ Resonance captures audio with FFmpeg, transcribes it locally using whisper.cpp, 
 - Obsidian Desktop ≥ 1.5
 - FFmpeg installed locally
 - whisper.cpp built locally (binary and model .bin)
-- Google Gemini API Key (for summaries)
+- LLM API Key or local Ollama (for summaries)
 
 ## Installation
 
@@ -112,12 +112,12 @@ In Obsidian → Resonance → Whisper:
 
 Models (manual download): see the official ggml models, e.g. small/medium/large. Place the `.bin` in `<repo>/models/` and select it in settings.
 
-### 3) LLM (Gemini)
+### 3) LLM
 
-- Create an API key from Google AI Studio.
-- In Obsidian → Resonance → LLM: paste the key and pick the model (`gemini-1.5-pro`, `gemini-2.5-flash`, or `gemini-2.5-pro`).
+- Create an API key from Google AI Studio or the LLM of your choice.
+- In Obsidian → Resonance → LLM: paste the key and pick the model.
 
-Only the text transcript is sent to Gemini. Audio stays local.
+Only the text transcript is sent to the LLM. Audio stays local.
 
 ### 4) Audio devices (mic and system audio)
 
@@ -162,7 +162,7 @@ Use “Test audio config” to record a 1‑second MP3. If it fails, verify perm
 - FFmpeg path set and working (test passes)
 - Whisper repo path + `whisper-cli` set
 - Model `.bin` selected (or downloaded)
-- Gemini API key and model set
+- API key and model set
 - Mic and (optional) system audio selected
 - Notes folder set
 
@@ -173,25 +173,17 @@ Use “Test audio config” to record a 1‑second MP3. If it fails, verify perm
 3) When finished, a note named `<Scenario> YYYY-MM-DD HH-mm.md` is created in your selected folder.  
 4) Open the Library (audio file icon) to browse, listen, download or delete recordings and transcripts.
 
-## Settings
-
-- **FFmpeg**: executable path; backend (auto/dshow/avfoundation/pulse/alsa); device scan; 3‑second test.
-- **Whisper**: repo path, whisper‑cli path, model picker or auto‑download; transcription language (auto or ISO code).
-- **LLM**: Gemini API Key and model.
-- **Obsidian**: output folder for generated notes.
-- **Recording**: audio quality and library settings.
-
 ## How it works (overview)
 
 1) FFmpeg writes an `.mp3` to `<vault>/.obsidian/plugins/resonance/recordings/`  
 2) whisper.cpp transcribes locally and writes a `.txt` transcript  
-3) Gemini summarizes the transcript  
+3) The LLM of your choice summarizes the transcript  
 4) Resonance creates a Markdown note in your chosen folder
 
 ## Privacy
 
-- Audio never leaves your machine.  
-- Only the text transcript is sent to Gemini for summarization.  
+- Audio never leaves your machine.
+- Only the text transcript is sent for summarization—unless you use Ollama, in which case everything stays local.
 - The API Key is stored locally in your vault.
 
 ## Troubleshooting
@@ -200,7 +192,7 @@ Use “Test audio config” to record a 1‑second MP3. If it fails, verify perm
 - No audio: verify backend/device; use Scan and the 3‑second Test.
 - Noise in recordings: match the sample rate in settings with your mic.
 - Empty transcription: check the `.mp3` file and the model path.
-- Gemini error: verify API key and selected model.
+- LLM error: verify API key and selected model.
 
 ## Contributing
 

@@ -6,6 +6,13 @@ import { LibraryModal } from "./LibraryModal";
 export interface ResonanceSettings {
   geminiApiKey: string;
   geminiModel: string;
+  llmProvider?: 'gemini' | 'openai' | 'anthropic' | 'ollama';
+  openaiApiKey?: string;
+  openaiModel?: string;
+  anthropicApiKey?: string;
+  anthropicModel?: string;
+  ollamaEndpoint?: string;
+  ollamaModel?: string;
   ffmpegPath: string;
   ffmpegInputFormat: "auto" | "avfoundation" | "dshow" | "pulse" | "alsa";
   ffmpegMicDevice: string;
@@ -29,6 +36,13 @@ export interface ResonanceSettings {
 export const DEFAULT_SETTINGS: ResonanceSettings = {
   geminiApiKey: "",
   geminiModel: "gemini-2.5-pro",
+  llmProvider: 'gemini',
+  openaiApiKey: "",
+  openaiModel: "gpt-4o-mini",
+  anthropicApiKey: "",
+  anthropicModel: "claude-3-5-sonnet-latest",
+  ollamaEndpoint: "http://localhost:11434",
+  ollamaModel: "llama3.1",
   ffmpegPath: "",
   ffmpegInputFormat: "auto",
   ffmpegMicDevice: "",
@@ -130,7 +144,7 @@ export class ResonanceSettingTab extends PluginSettingTab {
     // Campo di testo allargato per il percorso della repo whisper.cpp
     new Setting(containerEl)
       .setName("whisper.cpp repo path")
-      .setDesc("Cartella root della repo (es: /path/whisper.cpp)")
+      .setDesc("Root folder of the repo (es: /path/whisper.cpp)")
       .addText(text => {
         text
           .setPlaceholder(process.platform === 'win32' ? 'C:/whisper.cpp' : '/path/whisper.cpp')
@@ -202,40 +216,79 @@ export class ResonanceSettingTab extends PluginSettingTab {
         drop.onChange(async (value)=> { await this.save({ whisperLanguage: value }); });
       });
 
-    // STEP 3: LLM (Gemini)
+    // STEP 3: LLM
     containerEl.createEl("h3", { text: "LLM" });
     containerEl.createEl("p", { text: "Used to summarize the transcription." });
 
     new Setting(containerEl)
-    .setName("Installation")
-    .setDesc("Use your own API key.")
-    .addButton((btn)=> btn.setButtonText("Guide").onClick(()=> new HelpModal(this.app, 'llm').open()));
-    
-    const apiSetting = new Setting(containerEl)
-      .setName("Google Gemini API Key")
-      .setDesc("Key is stored locally in your vault.")
-      .addText(text =>
-        text
-          .setValue(this.settings.geminiApiKey)
-          .onChange(async (value) => { await this.save({ geminiApiKey: value }); })
-      );
-    apiSetting.settingEl.querySelector("input")?.setAttribute("type", "password");
+      .setName("Installation")
+      .setDesc("Use your own API key.")
+      .addButton((btn)=> btn.setButtonText("Guide").onClick(()=> new HelpModal(this.app, 'llm').open()));
 
     new Setting(containerEl)
-      .setName("Gemini model")
-      .setDesc("Available: 1.5‑pro, 2.5‑flash, 2.5‑pro.")
+      .setName("Provider")
+      .setDesc("Choose your LLM provider.")
       .addDropdown(drop => {
-        const allowed: string[] = ["gemini-1.5-pro", "gemini-2.5-flash", "gemini-2.5-pro"];
-        const labels: Record<string, string> = {
-          "gemini-1.5-pro": "gemini-1.5-pro",
-          "gemini-2.5-flash": "gemini-2.5-flash",
-          "gemini-2.5-pro": "gemini-2.5-pro",
-        };
-        allowed.forEach(k => drop.addOption(k, labels[k]));
-        const current = allowed.includes(this.settings.geminiModel) ? this.settings.geminiModel : "gemini-2.5-pro";
-        drop.setValue(current);
-        drop.onChange(async (value) => { await this.save({ geminiModel: value }); });
+        const providers: [string, string][] = [["gemini", "Gemini"], ["openai", "OpenAI"], ["anthropic", "Anthropic"], ["ollama", "Ollama (local)"]];
+        providers.forEach(([v, l]) => drop.addOption(v, l));
+        drop.setValue(this.settings.llmProvider || 'gemini');
+        drop.onChange(async (value) => { await this.save({ llmProvider: value as any }); this.display(); });
       });
+
+    if ((this.settings.llmProvider || 'gemini') === 'gemini') {
+      const apiSetting = new Setting(containerEl)
+        .setName("Google Gemini API Key")
+        .setDesc("Key is stored locally in your vault.")
+        .addText(text =>
+          text
+            .setValue(this.settings.geminiApiKey)
+            .onChange(async (value) => { await this.save({ geminiApiKey: value }); })
+        );
+      apiSetting.settingEl.querySelector("input")?.setAttribute("type", "password");
+
+      new Setting(containerEl)
+        .setName("Gemini model")
+        .setDesc("Available: 1.5‑pro, 2.5‑flash, 2.5‑pro.")
+        .addDropdown(drop => {
+          const allowed: string[] = ["gemini-1.5-pro", "gemini-2.5-flash", "gemini-2.5-pro"];
+          allowed.forEach(k => drop.addOption(k, k));
+          const current = allowed.includes(this.settings.geminiModel) ? this.settings.geminiModel : "gemini-2.5-pro";
+          drop.setValue(current);
+          drop.onChange(async (value) => { await this.save({ geminiModel: value }); });
+        });
+    }
+
+    if (this.settings.llmProvider === 'openai') {
+      const apiSetting = new Setting(containerEl)
+        .setName("OpenAI API Key")
+        .setDesc("Key is stored locally in your vault.")
+        .addText(text => text.setValue(this.settings.openaiApiKey || '').onChange(async (value)=>{ await this.save({ openaiApiKey: value }); }));
+      apiSetting.settingEl.querySelector("input")?.setAttribute("type", "password");
+      new Setting(containerEl)
+        .setName("OpenAI model")
+        .addText(text => text.setPlaceholder("gpt-4o-mini").setValue(this.settings.openaiModel || 'gpt-4o-mini').onChange(async (value)=>{ await this.save({ openaiModel: value }); }));
+    }
+
+    if (this.settings.llmProvider === 'anthropic') {
+      const apiSetting = new Setting(containerEl)
+        .setName("Anthropic API Key")
+        .setDesc("Key is stored locally in your vault.")
+        .addText(text => text.setValue(this.settings.anthropicApiKey || '').onChange(async (value)=>{ await this.save({ anthropicApiKey: value }); }));
+      apiSetting.settingEl.querySelector("input")?.setAttribute("type", "password");
+      new Setting(containerEl)
+        .setName("Anthropic model")
+        .addText(text => text.setPlaceholder("claude-3-5-sonnet-latest").setValue(this.settings.anthropicModel || 'claude-3-5-sonnet-latest').onChange(async (value)=>{ await this.save({ anthropicModel: value }); }));
+    }
+
+    if (this.settings.llmProvider === 'ollama') {
+      new Setting(containerEl)
+        .setName("Endpoint")
+        .setDesc("e.g., http://localhost:11434")
+        .addText(text => text.setPlaceholder("http://localhost:11434").setValue(this.settings.ollamaEndpoint || 'http://localhost:11434').onChange(async (value)=>{ await this.save({ ollamaEndpoint: value }); }));
+      new Setting(containerEl)
+        .setName("Model")
+        .addText(text => text.setPlaceholder("llama3.1").setValue(this.settings.ollamaModel || 'llama3.1').onChange(async (value)=>{ await this.save({ ollamaModel: value }); }));
+    }
 
     // STEP 4: Audio devices
     containerEl.createEl("h3", { text: "Audio devices" });

@@ -1,4 +1,6 @@
 import { App, Notice, TFile } from "obsidian";
+import { summarizeWithLLM, type LlmConfig } from "./llm";
+import { normalizeCheckboxes } from "./markdown";
 import { scanDevices } from "./DeviceScanner";
 import type { ResonanceSettings } from "./settings";
 
@@ -389,43 +391,32 @@ export class RecorderService {
 
   private async summarize(transcript: string) {
     this.setPhase("summarizing");
-    const { geminiApiKey, geminiModel } = this.settings;
-    if (!geminiApiKey) throw new Error("Gemini API Key not configured");
-
     const { PROMPT_PRESETS, DEFAULT_PROMPT_KEY } = await import('./prompts');
     const preset = PROMPT_PRESETS[this.selectedPresetKey || this.settings.lastPromptKey || DEFAULT_PROMPT_KEY] || PROMPT_PRESETS[DEFAULT_PROMPT_KEY];
     const prompt = preset.prompt;
 
-    const model = (geminiModel || "gemini-1.5-pro").trim();
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+    const cfg: LlmConfig = (() => {
+      const provider = this.settings.llmProvider || 'gemini';
+      if (provider === 'openai') return { provider, apiKey: this.settings.openaiApiKey, model: this.settings.openaiModel || 'gpt-4o-mini' };
+      if (provider === 'anthropic') return { provider, apiKey: this.settings.anthropicApiKey, model: this.settings.anthropicModel || 'claude-3-5-sonnet-latest' };
+      if (provider === 'ollama') return { provider, model: this.settings.ollamaModel || 'llama3.1', endpoint: this.settings.ollamaEndpoint || 'http://localhost:11434' };
+      return { provider: 'gemini', apiKey: this.settings.geminiApiKey, model: this.settings.geminiModel || 'gemini-2.5-pro' };
+    })();
 
-    const body = {
-      contents: [
-        {
-          role: "user",
-          parts: [
-            { text: prompt },
-            { text: `\n\nTrascrizione:\n${transcript}` },
-          ],
-        },
-      ],
-    } as any;
-
-    const res = await fetch(`${url}?key=${encodeURIComponent(geminiApiKey)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const errTxt = await res.text().catch(() => "");
-      throw new Error(`Gemini API error: ${res.status} ${errTxt}`);
+    const expectedLang = (this.settings.whisperLanguage || 'auto');
+    // Importa la funzione di rilevamento per il log
+    const { detectLanguageFromTranscript } = await import('./llm');
+    const detectedLang = expectedLang === 'auto' ? detectLanguageFromTranscript(transcript) : expectedLang;
+    this.appendLog(`Generating summary with ${cfg.provider}, language setting: ${expectedLang}, effective: ${detectedLang}`);
+    const raw = await summarizeWithLLM(cfg, prompt, transcript, expectedLang);
+    const summary = normalizeCheckboxes(raw || '');
+    if (!summary.trim()) {
+      this.appendLog(`Summary skipped: empty output (provider=${cfg.provider}).`);
+      this.onInfo?.("Summary skipped");
+      this.setPhase("done");
+      return;
     }
-
-    const json = await res.json();
-    const summary = extractMarkdownFromGemini(json) || "";
-    if (!summary) throw new Error("Empty summary from Gemini");
-    this.appendLog(`Summary generated (${summary.length} chars)`);
+    this.appendLog(`Summary generated (${summary.length} chars) via ${cfg.provider}, final lang=${detectedLang}`);
 
     await this.createNote(summary);
   }
