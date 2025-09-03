@@ -14,6 +14,8 @@ export class LibraryModal extends Modal {
   private listEl!: HTMLElement;
   private items: LibraryItem[] = [];
   private toolbarEl!: HTMLElement;
+  private statusEl!: HTMLElement;
+  private busy: boolean = false;
   private fromDate: string = ""; // YYYY-MM-DD
   private toDate: string = "";   // YYYY-MM-DD
   private sortMode: "date-desc" | "date-asc" | "size-desc" | "size-asc" | "name-asc" | "name-desc" = "date-desc";
@@ -35,6 +37,9 @@ export class LibraryModal extends Modal {
     contentEl.createEl("h2", { text: "Recordings Library" });
     const hint = contentEl.createEl("p", { text: "Review, listen, download or delete your recordings." });
     hint.style.marginTop = "0";
+
+    this.statusEl = contentEl.createEl("div", { cls: "resonance-status" });
+    this.statusEl.setText("");
 
     this.toolbarEl = contentEl.createEl("div", { cls: "resonance-toolbar" });
     this.buildToolbar();
@@ -265,6 +270,7 @@ export class LibraryModal extends Modal {
 
     // Menu dropdown per "More"
     moreBtn.addEventListener("click", async (ev) => {
+      if (this.busy) { new Notice('Another operation is in progress…'); return; }
       ev.stopPropagation();
       
       // Rimuovi eventuali menu aperti
@@ -400,6 +406,7 @@ export class LibraryModal extends Modal {
     const fs = (window as any).require('fs');
     if (!fs.existsSync(it.audioPath)) { new Notice('Audio not found'); return; }
     try {
+      this.busy = true; this.setBusyStatus('Regenerating transcript…');
       const path = (window as any).require('path');
       const plugin = (this.app as any).plugins.getPlugin(this.pluginId);
       if (!plugin) { new Notice('Plugin not available'); return; }
@@ -421,6 +428,8 @@ export class LibraryModal extends Modal {
       new Notice('Transcript regenerated');
     } catch (e: any) {
       new Notice(`Regenerate failed: ${e?.message ?? e}`);
+    } finally {
+      this.busy = false; this.clearBusyStatus();
     }
   }
 
@@ -428,13 +437,14 @@ export class LibraryModal extends Modal {
     const fs = (window as any).require('fs');
     if (!fs.existsSync(it.transcriptPath)) { new Notice('Transcript not found'); return; }
     try {
+      this.busy = true; this.setBusyStatus('Regenerating summary…');
       const transcript: string = fs.readFileSync(it.transcriptPath, { encoding: 'utf8' });
       const plugin = (this.app as any).plugins.getPlugin(this.pluginId);
       if (!plugin) { new Notice('Plugin not available'); return; }
       const settings = plugin.settings as any;
       const { PROMPT_PRESETS, DEFAULT_PROMPT_KEY } = await import('./prompts');
       const { summarizeWithLLM } = await import('./llm');
-      const { normalizeCheckboxes } = await import('./markdown');
+      const { normalizeCheckboxes, sanitizeSummary } = await import('./markdown');
       const preset = PROMPT_PRESETS[settings.lastPromptKey || DEFAULT_PROMPT_KEY] || PROMPT_PRESETS[DEFAULT_PROMPT_KEY];
       const provider = settings.llmProvider || 'gemini';
       const cfg: any = provider === 'openai' ? { provider, apiKey: settings.openaiApiKey, model: settings.openaiModel || 'gpt-4o-mini' }
@@ -446,7 +456,7 @@ export class LibraryModal extends Modal {
       const detectedLang = expectedLang === 'auto' ? detectLanguageFromTranscript(transcript) : expectedLang;
       console.log(`[Resonance] Regenerating summary with ${provider}, language setting: ${expectedLang}, effective: ${detectedLang}`);
       const raw = await summarizeWithLLM(cfg, preset.prompt, transcript, expectedLang);
-      const summary = normalizeCheckboxes(raw || '');
+      const summary = normalizeCheckboxes(sanitizeSummary(raw || ''));
       if (!summary.trim()) {
         new Notice('Summary skipped: empty output from LLM');
         return;
@@ -464,7 +474,25 @@ export class LibraryModal extends Modal {
       await leaf.openFile(tfile as TFile);
     } catch (e: any) {
       new Notice(`Regenerate failed: ${e?.message ?? e}`);
+    } finally {
+      this.busy = false; this.clearBusyStatus();
     }
+  }
+
+  private setBusyStatus(text: string) {
+    try {
+      this.statusEl?.setText(text);
+      const allBtns = Array.from(this.modalEl.querySelectorAll('button')) as HTMLButtonElement[];
+      allBtns.forEach(b => b.disabled = true);
+    } catch {}
+  }
+
+  private clearBusyStatus() {
+    try {
+      this.statusEl?.setText('');
+      const allBtns = Array.from(this.modalEl.querySelectorAll('button')) as HTMLButtonElement[];
+      allBtns.forEach(b => b.disabled = false);
+    } catch {}
   }
 
   private async readTextSafe(filePath: string): Promise<string | null> {

@@ -154,7 +154,7 @@ export default class ResonancePlugin extends Plugin {
       whisperModelPath: this.settings.whisperModelPath,
     });
 
-    if (!deps.hasApiKey || !deps.ffmpegOk || !deps.whisperOk || !deps.modelOk) {
+    if (!deps.ffmpegOk || !deps.whisperOk || !deps.modelOk) {
       new Notice("Incomplete configuration. Go to Settings → Resonance to fill in the required fields.");
       return false;
     }

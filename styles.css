@@ -56,8 +56,8 @@
 
 .resonance-status {
   font-size: 14px;
-  color: var(--text-muted);
-  margin-bottom: 8px;
+  color: #e03131;
+  margin-bottom: 10px;
   transition: color 0.2s ease;
 }
 

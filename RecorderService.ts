@@ -409,7 +409,8 @@ export class RecorderService {
     const detectedLang = expectedLang === 'auto' ? detectLanguageFromTranscript(transcript) : expectedLang;
     this.appendLog(`Generating summary with ${cfg.provider}, language setting: ${expectedLang}, effective: ${detectedLang}`);
     const raw = await summarizeWithLLM(cfg, prompt, transcript, expectedLang);
-    const summary = normalizeCheckboxes(raw || '');
+    const { sanitizeSummary } = await import('./markdown');
+    const summary = normalizeCheckboxes(sanitizeSummary(raw || ''));
     if (!summary.trim()) {
       this.appendLog(`Summary skipped: empty output (provider=${cfg.provider}).`);
       this.onInfo?.("Summary skipped");
