@@ -531,11 +531,13 @@ export class ResonanceSettingTab extends PluginSettingTab {
 
   private async downloadModelPreset(): Promise<string | null> {
     const preset = this.settings.whisperModelPreset || 'medium';
-    const url = preset === 'small'
-      ? 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin'
+    const fileName = preset === 'small'
+      ? 'ggml-small.bin'
       : preset === 'large'
-      ? 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large.bin'
-      : 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin';
+      ? 'ggml-large-v3.bin'
+      : 'ggml-medium.bin';
+    const baseUrl = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/';
+    const url = `${baseUrl}${fileName}?download=true`;
 
     const path = (window as any).require('path');
     const fs = (window as any).require('fs');
@@ -546,19 +548,25 @@ export class ResonanceSettingTab extends PluginSettingTab {
     if (!modelsDir) throw new Error('Set the repo folder first or provide a model path');
     try { fs.mkdirSync(modelsDir, { recursive: true }); } catch {}
 
-    const outFile = path.join(modelsDir, url.split('/').pop());
+    const outFile = path.join(modelsDir, fileName);
 
     await new Promise<void>((resolve, reject) => {
-      const file = fs.createWriteStream(outFile);
-      https.get(url, (res: any) => {
-        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          https.get(res.headers.location, (res2: any) => res2.pipe(file).on('finish', resolve)).on('error', reject);
-        } else if (res.statusCode === 200) {
-          res.pipe(file).on('finish', resolve);
-        } else {
-          reject(new Error('HTTP ' + res.statusCode));
-        }
-      }).on('error', reject);
+      const follow = (u: string, depth: number) => {
+        if (depth > 5) return reject(new Error('Too many redirects'));
+        https.get(u, (res: any) => {
+          if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            const next = res.headers.location.startsWith('http') ? res.headers.location : new URL(res.headers.location, u).toString();
+            return follow(next, depth + 1);
+          }
+          if (res.statusCode === 200) {
+            const file = fs.createWriteStream(outFile);
+            res.pipe(file).on('finish', resolve).on('error', reject);
+          } else {
+            reject(new Error('HTTP ' + res.statusCode));
+          }
+        }).on('error', reject);
+      };
+      follow(url, 0);
     });
 
     return outFile;

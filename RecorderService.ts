@@ -588,10 +588,12 @@ export class RecorderService {
     const lang = (whisperLanguage || "auto").trim();
     if (lang && lang !== "auto") { args.push("-l", lang); }
     
-    // Parametri anti-loop per chunk
+    // Parametri anti-loop + accuratezza
     args.push("--max-context", "128", "--entropy-thold", "2.4", "--logprob-thold", "-1.0", "--max-len", "0");
-    args.push("--max-context", "128", "--entropy-thold", "2.4", "--logprob-thold", "-1.0", "--max-len", "0");
-    args.push("--best-of", "1", "--no-timestamps", "--word-thold", "0.01");
+    // Beam search per maggiore accuratezza (più lento)
+    args.push("-bs", "5");
+    // Manteniamo i timestamp (niente --no-timestamps) per aiutare il decoder
+    args.push("--word-thold", "0.01");
     
     // Output su file temporaneo
     const tempTxtPath = chunkPath.replace(/\.mp3$/i, ".txt");
