@@ -1,5 +1,7 @@
 export type LlmProvider = 'gemini' | 'openai' | 'anthropic' | 'ollama';
 
+// This module provides a function to summarize the transcription with the selected LLM provider.
+
 export interface LlmConfig {
   provider: LlmProvider;
   apiKey?: string;
@@ -217,7 +219,7 @@ async function summarizeWithOllama(cfg: LlmConfig, prompt: string, transcript: s
   console.log(`[Resonance/Ollama] Language instruction: ${langInstruction}`);
   
   const body = {
-    model: cfg.model || 'llama3.1',
+    model: cfg.model || 'qwen3:8b',
     prompt: fullPrompt,
     stream: false,
     options: { temperature: 0 },

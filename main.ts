@@ -28,29 +28,23 @@ export default class ResonancePlugin extends Plugin {
       await this.saveSettings(partial);
     });
 
-    // Library icon first (so it appears above the microphone icon)
     const libRibbon = this.addRibbonIcon("audio-file", "Resonance - Library", async () => {
       const { LibraryModal } = await import('./LibraryModal');
       new LibraryModal(this.app, this.manifest.id).open();
     });
     libRibbon.addClass("resonance-ribbon");
-    // Sposta in fondo (con flex column-reverse = primo figlio)
     this.moveRibbonToBottom(libRibbon);
-    // Ripeti a layout pronto (altri plugin possono aggiungere icone dopo)
     this.app.workspace.onLayoutReady(() => {
       window.setTimeout(() => this.moveRibbonToBottom(libRibbon), 0);
       window.setTimeout(() => this.moveRibbonToBottom(libRibbon), 500);
     });
 
-    // Microphone icon below library icon
     const ribbonIconEl = this.addRibbonIcon("mic", "Resonance - Meeting recorder", async () => {
       await this.toggleFromRibbonWithPreset();
     });
     this.ribbonIconEl = ribbonIconEl;
     ribbonIconEl.addClass("resonance-ribbon");
-    // Sposta in fondo (con flex column-reverse = primo figlio)
     this.moveRibbonToBottom(ribbonIconEl);
-    // Ripeti a layout pronto (altri plugin possono aggiungere icone dopo)
     this.app.workspace.onLayoutReady(() => {
       window.setTimeout(() => this.moveRibbonToBottom(ribbonIconEl), 0);
       window.setTimeout(() => this.moveRibbonToBottom(ribbonIconEl), 500);
@@ -98,7 +92,6 @@ export default class ResonancePlugin extends Plugin {
       new Notice(message);
     };
 
-    // Expose global helpers for the Setup Wizard
     window.resonanceAutoDetectFfmpeg = async () => {
       try { return await autoDetectFfmpeg(); } catch { return null; }
     };

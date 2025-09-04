@@ -1,3 +1,5 @@
+// This module provides the prompts for the plugin.
+
 export type PromptPreset = {
   key: string;
   label: string;

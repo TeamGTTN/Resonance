@@ -1,8 +1,7 @@
 import { Notice, TFile } from "obsidian";
 
-// Utility minima per verificare se un percorso esiste ed è eseguibile.
-// In ambiente Obsidian desktop (Electron), l'accesso a Node è disponibile.
-// Tuttavia alcuni ambienti potrebbero limitare i permessi: gestiamo gli errori con grazia.
+// This module provides a function to check the dependencies of the plugin, including the API key, FFmpeg, whisper.cpp, and the model.
+// It also provides a function to detect the paths of FFmpeg and whisper.cpp executables across different operating systems.
 
 export interface DependencyState {
   hasApiKey: boolean;
@@ -72,7 +71,7 @@ export async function checkDependencies(options: {
       missingMessages.push("Whisper model path not set");
     }
   } catch (e) {
-    // In caso di errore d'accesso a fs (sandbox, permessi), forniamo un fallback prudente
+    // In caso di errore d'accesso a fs (sandbox, permessi), forniamo un fallback
     // senza bloccare l'utente, ma indicando l'impossibilità di verificare completamente.
     if (!ffmpegOk) missingMessages.push("Unable to verify FFmpeg (runtime restrictions)");
     if (!whisperOk) missingMessages.push("Unable to verify whisper.cpp (runtime restrictions)");

@@ -1,5 +1,9 @@
 import { App, Modal } from "obsidian";
 
+// This module provides a modal for displaying help content for the plugin.
+// It displays the help content for the selected topic.
+// It also provides a function to get the content for the selected topic.
+
 export type HelpTopic = 'ffmpeg' | 'whisper' | 'llm' | 'devices' | 'obsidian';
 
 export class HelpModal extends Modal {

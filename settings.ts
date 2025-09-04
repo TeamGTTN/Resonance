@@ -42,7 +42,7 @@ export const DEFAULT_SETTINGS: ResonanceSettings = {
   anthropicApiKey: "",
   anthropicModel: "claude-3-5-sonnet-latest",
   ollamaEndpoint: "http://localhost:11434",
-  ollamaModel: "llama3.1",
+  ollamaModel: "qwen3:8b",
   ffmpegPath: "",
   ffmpegInputFormat: "auto",
   ffmpegMicDevice: "",
@@ -287,7 +287,7 @@ export class ResonanceSettingTab extends PluginSettingTab {
         .addText(text => text.setPlaceholder("http://localhost:11434").setValue(this.settings.ollamaEndpoint || 'http://localhost:11434').onChange(async (value)=>{ await this.save({ ollamaEndpoint: value }); }));
       new Setting(containerEl)
         .setName("Model")
-        .addText(text => text.setPlaceholder("llama3.1").setValue(this.settings.ollamaModel || 'llama3.1').onChange(async (value)=>{ await this.save({ ollamaModel: value }); }));
+        .addText(text => text.setPlaceholder("qwen3:8b").setValue(this.settings.ollamaModel || 'qwen3:8b').onChange(async (value)=>{ await this.save({ ollamaModel: value }); }));
     }
 
     // STEP 4: Audio devices

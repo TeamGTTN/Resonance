@@ -4,6 +4,8 @@ import { normalizeCheckboxes } from "./markdown";
 import { scanDevices } from "./DeviceScanner";
 import type { ResonanceSettings } from "./settings";
 
+// This module provides the recorder service for the plugin.
+
 export type RecorderPhase = "idle" | "recording" | "transcribing" | "summarizing" | "error" | "done";
 
 export class RecorderService {
@@ -25,6 +27,17 @@ export class RecorderService {
   private transcriptPath: string = "";
   private logPath: string = "";
   private selectedPresetKey: string | null = null;
+
+  private liveWatcher: any | null = null;
+  private liveProcessedSegments: Set<string> = new Set();
+  private livePendingTimers: Map<string, any> = new Map();
+  private liveSegmentPattern: string | null = null;
+  private liveSegmentRegex: RegExp | null = null;
+  private liveNoteFile: TFile | null = null;
+  private liveSeenIndexes: Set<number> = new Set();
+  private liveMaxIndexSeen: number = -1;
+  private liveSeenPaths: Set<string> = new Set();
+  private liveVaultFolder: string | null = null;
 
   onPhaseChange?: (phase: RecorderPhase) => void;
   onElapsed?: (seconds: number) => void;
@@ -95,9 +108,19 @@ export class RecorderService {
         const stat = fs.statSync(this.audioPath);
         this.appendLog(`Recording finished. File: ${this.audioPath} (${stat.size} bytes)`);
       } catch { this.appendLog(`Recording finished. File: ${this.audioPath}`); }
-      this.onInfo?.(`Transcribing...`);
       await this.enforceRetention();
-      await this.transcribe();
+      // Live only: ferma watcher, poi passa al riassunto
+      await this.stopLiveWatcherAndFinalize();
+      this.setPhase("summarizing");
+      const fs = (window as any).require("fs");
+      const transcript = fs.existsSync(this.transcriptPath) ? String(fs.readFileSync(this.transcriptPath, { encoding: "utf8" })) : "";
+      if (transcript.trim().replace(/\s+/g, "").length < 150) {
+        this.onInfo?.("Transcription too short – summary skipped");
+        this.setPhase("done");
+        return;
+      }
+      this.onInfo?.("Summarizing...");
+      await this.summarize(transcript);
     } catch (e: any) {
       const msg = String(e?.message ?? e);
       this.onError?.(msg);
@@ -125,11 +148,17 @@ export class RecorderService {
     const name = `recording_${
       stamp.getFullYear()
     }-${String(stamp.getMonth() + 1).padStart(2, "0")}-${String(stamp.getDate()).padStart(2, "0")}_${String(stamp.getHours()).padStart(2, "0")}-${String(stamp.getMinutes()).padStart(2, "0")}-${String(stamp.getSeconds()).padStart(2, "0")}.mp3`;
-    this.audioDir = recDir;
-    this.audioPath = path.join(recDir, name);
     const base = name.replace(/\.mp3$/i, "");
-    this.transcriptPath = path.join(recDir, `${base}.txt`);
-    this.logPath = path.join(recDir, `${base}.log`);
+    const baseDir = path.join(recDir, base);
+    try { if (!fs.existsSync(baseDir)) fs.mkdirSync(baseDir, { recursive: true }); } catch {}
+    this.audioDir = baseDir;
+    this.audioPath = path.join(baseDir, name);
+    this.transcriptPath = path.join(baseDir, `${base}.txt`);
+    this.logPath = path.join(baseDir, `${base}.log`);
+
+    // Prepara pattern per segmenti live
+    this.liveSegmentPattern = `${base}_seg_%03d.mp3`;
+    this.liveSegmentRegex = new RegExp(`^${base}_seg_(\\d{3})\\.mp3$`);
 
     try { fs.appendFileSync(this.logPath, `[${new Date().toISOString()}] Sessione iniziata\n`); } catch {}
   }
@@ -284,13 +313,29 @@ export class RecorderService {
     if (inputs.length === 0) throw new Error("No FFmpeg input device configured. Set at least the microphone.");
 
     const shouldMix = Boolean(micSpec && systemSpec);
-    // Mix semplice senza filtri complessi per evitare problemi di sincronizzazione
     const mixArgs = shouldMix ? [
-      "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=longest"
+      "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=longest[aout]"
     ] : [];
+    const mapArgs = shouldMix ? ["-map", "[aout]"] : ["-map", "0:a"];
     const br = Math.max(64, Number(this.settings.recordBitrateKbps || 192));
     const audioFmtArgs = ["-vn", "-ar", String(sr), "-ac", String(ch)];
-    const outputArgs = [...audioFmtArgs, "-acodec", "libmp3lame", "-ab", `${br}k`, this.audioPath];
+    let outputArgs: string[];
+    {
+      // Segmentazione in tempo reale + copia file completo
+      // Segmenti fissi di 20 secondi
+      const segSeconds = 20;
+      const path = (window as any).require("path");
+      const segPattern = path.join(this.audioDir, this.liveSegmentPattern || "segments_%03d.mp3");
+      // tee muxer: un ramo segmentato, un ramo file completo
+      const teeSpec = `[f=segment:segment_time=${segSeconds}:reset_timestamps=1]${segPattern}|${this.audioPath}`;
+      outputArgs = [
+        ...audioFmtArgs,
+        ...mapArgs,
+        "-c:a","libmp3lame","-b:a",`${br}k`,
+        "-f","tee",
+        teeSpec
+      ];
+    }
 
     this.setPhase("recording");
     this.startElapsedTimer();
@@ -343,51 +388,13 @@ export class RecorderService {
         }
       } catch {}
     };
+
+    // Se live attivo, avvia watcher per nuovi segmenti
+    this.startLiveWatcher();
+    await this.ensureLiveNoteOpen();
   }
 
-  private async transcribe() {
-    this.setPhase("transcribing");
-    const { whisperMainPath, whisperModelPath, whisperLanguage } = this.settings;
-    if (!whisperMainPath) throw new Error("whisper-cli path not configured");
-    if (!whisperModelPath) throw new Error("Whisper model path not configured");
-
-    const { spawn } = (window as any).require("child_process");
-    const fs = (window as any).require("fs");
-
-    const args = ["-m", whisperModelPath, "-f", this.audioPath];
-    const lang = (whisperLanguage || "auto").trim();
-    if (lang && lang !== "auto") { args.push("-l", lang); }
-    this.appendLog(`Transcription: ${whisperMainPath} ${args.join(" ")}`);
-
-    const stdoutBuf: string[] = [];
-    let stderrBuf = "";
-
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn(whisperMainPath, args, { cwd: this.audioDir });
-      child.stdout?.on("data", (d: Buffer) => stdoutBuf.push(d.toString()));
-      child.stderr?.on("data", (d: Buffer) => { stderrBuf += d.toString(); });
-      child.on("error", (err: any) => reject(err));
-      child.on("close", (code: number) => {
-        if (code === 0) resolve(); else reject(new Error(`whisper-cli exited with code ${code}: ${stderrBuf}`));
-      });
-    });
-
-    const transcript = stdoutBuf.join("").trim();
-    if (!transcript) throw new Error("Empty transcription");
-    try { fs.writeFileSync(this.transcriptPath, transcript, { encoding: "utf8" }); this.appendLog(`Transcription saved: ${this.transcriptPath} (${transcript.length} chars)`); } catch {}
-
-    // Se la trascrizione è troppo corta, probabilmente c'è stato un problema audio → salta Gemini
-    const compactLen = transcript.replace(/\s+/g, "").length;
-    if (compactLen < 150) {
-      this.appendLog(`Transcription too short (${compactLen} chars). Skipping summarization.`);
-      this.onInfo?.("Transcription too short – summary skipped");
-      this.setPhase("done");
-      return;
-    }
-
-    this.onInfo?.(`Summarizing...`);
-    await this.summarize(transcript);
-  }
+  // Post-process transcription removed: live only
 
   private async summarize(transcript: string) {
     this.setPhase("summarizing");
@@ -399,7 +406,7 @@ export class RecorderService {
       const provider = this.settings.llmProvider || 'gemini';
       if (provider === 'openai') return { provider, apiKey: this.settings.openaiApiKey, model: this.settings.openaiModel || 'gpt-4o-mini' };
       if (provider === 'anthropic') return { provider, apiKey: this.settings.anthropicApiKey, model: this.settings.anthropicModel || 'claude-3-5-sonnet-latest' };
-      if (provider === 'ollama') return { provider, model: this.settings.ollamaModel || 'llama3.1', endpoint: this.settings.ollamaEndpoint || 'http://localhost:11434' };
+      if (provider === 'ollama') return { provider, model: this.settings.ollamaModel || 'qwen3:8b', endpoint: this.settings.ollamaEndpoint || 'http://localhost:11434' };
       return { provider: 'gemini', apiKey: this.settings.geminiApiKey, model: this.settings.geminiModel || 'gemini-2.5-pro' };
     })();
 
@@ -423,17 +430,9 @@ export class RecorderService {
   }
 
   private async createNote(markdown: string) {
-    const date = window.moment().format("YYYY-MM-DD HH-mm");
-    let scenarioLabel: string | null = null;
-    try {
-      const { PROMPT_PRESETS, DEFAULT_PROMPT_KEY } = await import('./prompts');
-      const key = (this.selectedPresetKey || this.settings.lastPromptKey || DEFAULT_PROMPT_KEY);
-      scenarioLabel = PROMPT_PRESETS[key]?.label || null;
-    } catch {}
-    const safe = (s: string) => s.replace(/[\\/:*?"<>|]/g, '-');
-    const fileName = scenarioLabel ? `${safe(scenarioLabel)} ${date}.md` : `Meeting ${date}.md`;
-    const folder = this.settings.outputFolder?.trim();
-    const fullPath = folder ? `${folder}/${fileName}` : fileName;
+    try { if (!this.liveVaultFolder) await this.ensureLiveNoteOpen(); } catch {}
+    const folderPath = this.liveVaultFolder || (this.settings.outputFolder?.trim() || '');
+    const fullPath = folderPath ? `${folderPath}/Summary.md` : `Summary ${window.moment().format("YYYY-MM-DD HH-mm")}.md`;
     const tfile = await this.app.vault.create(fullPath, markdown);
     new Notice("Note created!");
     this.appendLog(`Note created: ${fullPath}`);
@@ -449,6 +448,182 @@ export class RecorderService {
       const fs = (window as any).require("fs");
       fs.appendFileSync(this.logPath, `[${new Date().toISOString()}] ${message}\n`);
     } catch {}
+  }
+
+  // Avvia un watcher sulla cartella per trascrivere i segmenti appena chiusi
+  private startLiveWatcher() {
+    try {
+      const fs = (window as any).require("fs");
+      if (!this.liveSegmentRegex) return;
+      // Reset stato
+      this.liveProcessedSegments.clear();
+      for (const t of this.livePendingTimers.values()) { try { clearTimeout(t); } catch {} }
+      this.livePendingTimers.clear();
+      this.liveSeenPaths.clear();
+      // Crea/azzera transcript file
+      try { fs.writeFileSync(this.transcriptPath, ""); } catch {}
+
+      this.appendLog("Live watcher started");
+      this.liveWatcher = fs.watch(this.audioDir, { persistent: true }, (event: string, filename: string) => {
+        try {
+          if (!filename) return;
+          const m = this.liveSegmentRegex!.exec(filename);
+          if (!m) return;
+          const idx = parseInt(m[1], 10);
+          const segPath = `${this.audioDir}/${filename}`;
+          if (!Number.isFinite(idx)) return;
+          if (!this.liveSeenPaths.has(segPath)) {
+            this.liveSeenPaths.add(segPath);
+            this.appendLog(`Detected new live segment: ${filename}`);
+          }
+          this.liveSeenIndexes.add(idx);
+          this.liveMaxIndexSeen = Math.max(this.liveMaxIndexSeen, idx);
+          // Processa il segmento precedente (idx-1) se presente e non processato
+          const prevIdx = idx - 1;
+          if (prevIdx >= 0) {
+            const prevName = filename.replace(/_(\d{3})\.mp3$/, `_${String(prevIdx).padStart(3,'0')}.mp3`);
+            const prevPath = `${this.audioDir}/${prevName}`;
+            if (!this.liveProcessedSegments.has(prevPath)) {
+              if (!this.livePendingTimers.has(prevPath)) {
+                const t = setTimeout(()=>{
+                  this.livePendingTimers.delete(prevPath);
+                  this.handleNewLiveSegment(prevPath).catch(()=>{});
+                }, 800);
+                this.livePendingTimers.set(prevPath, t);
+              }
+            }
+          }
+        } catch {}
+      });
+    } catch {}
+  }
+
+  private async handleNewLiveSegment(segPath: string) {
+    try {
+      if (this.liveProcessedSegments.has(segPath)) return;
+      this.liveProcessedSegments.add(segPath);
+      const idxMatch = segPath.match(/_(\d{3})\.mp3$/);
+      const idx = idxMatch ? parseInt(idxMatch[1], 10) : 0;
+      const text = await this.transcribeChunk(segPath, idx);
+      if (!text.trim()) return;
+      const fs = (window as any).require("fs");
+      const prefix = (fs.existsSync(this.transcriptPath) && fs.readFileSync(this.transcriptPath, 'utf8').trim() ? "\n\n" : "");
+      fs.appendFileSync(this.transcriptPath, prefix + text, { encoding: 'utf8' });
+      await this.updateLiveNote(prefix + text);
+      try { fs.unlinkSync(segPath); } catch {}
+    } catch (e: any) {
+      this.appendLog(`Live segment failed: ${e?.message ?? e}`);
+    }
+  }
+
+  private async ensureLiveNoteOpen() {
+    try {
+      const date = window.moment().format("YYYY-MM-DD HH-mm");
+      let scenarioLabel: string | null = null;
+      try {
+        const { PROMPT_PRESETS, DEFAULT_PROMPT_KEY } = await import('./prompts');
+        const key = (this.selectedPresetKey || this.settings.lastPromptKey || DEFAULT_PROMPT_KEY);
+        scenarioLabel = PROMPT_PRESETS[key]?.label || null;
+      } catch {}
+      const safe = (s: string) => s.replace(/[\\/:*?"<>|]/g, '-');
+      const folderBase = scenarioLabel ? `${safe(scenarioLabel)} ${date}` : `Meeting ${date}`;
+      const root = (this.settings.outputFolder || '').trim();
+      const folderPath = root ? `${root}/${folderBase}` : folderBase;
+      this.liveVaultFolder = folderPath;
+      const vault = this.app.vault;
+      try { await (vault as any).createFolder(folderPath); } catch {}
+      const notePath = `${folderPath}/Live transcript.md`;
+      let file = this.liveNoteFile;
+      if (!file) {
+        try {
+          const existing = vault.getAbstractFileByPath(notePath) as TFile | null;
+          file = existing || await vault.create(notePath, `# Live transcript\n\n`);
+          this.liveNoteFile = file;
+        } catch {}
+      }
+      const leaf = this.app.workspace.getLeaf(true);
+      await leaf.openFile(this.liveNoteFile as TFile);
+    } catch {}
+  }
+
+  private async updateLiveNote(appendText: string) {
+    try {
+      if (!this.liveNoteFile) return;
+      const vault = this.app.vault;
+      const current = await vault.read(this.liveNoteFile);
+      const next = current + appendText;
+      await vault.modify(this.liveNoteFile, next);
+    } catch {}
+  }
+
+  private async stopLiveWatcherAndFinalize() {
+    try {
+      const fs = (window as any).require("fs");
+      if (this.liveWatcher) { try { this.liveWatcher.close?.(); } catch {} this.liveWatcher = null; }
+      // Processa l'ultimo segmento (max index) non ancora processato
+      const files: string[] = fs.readdirSync(this.audioDir) ?? [];
+      const segs = this.liveSegmentRegex ? files.filter(f => this.liveSegmentRegex!.test(f)) : [];
+      segs.sort();
+      for (const f of segs) {
+        const p = `${this.audioDir}/${f}`;
+        if (!this.liveProcessedSegments.has(p)) {
+          await this.handleNewLiveSegment(p);
+        }
+      }
+      // Cleanup timers
+      for (const t of this.livePendingTimers.values()) { try { clearTimeout(t); } catch {} }
+      this.livePendingTimers.clear();
+      this.appendLog("Live watcher stopped");
+    } catch {}
+  }
+
+  // Trascrivi un singolo chunk
+  private async transcribeChunk(chunkPath: string, chunkIndex: number): Promise<string> {
+    const { spawn } = (window as any).require("child_process");
+    const fs = (window as any).require("fs");
+    const path = (window as any).require("path");
+    const { whisperMainPath, whisperModelPath, whisperLanguage } = this.settings;
+    
+    const args = ["-m", whisperModelPath, "-f", chunkPath];
+    const lang = (whisperLanguage || "auto").trim();
+    if (lang && lang !== "auto") { args.push("-l", lang); }
+    
+    // Parametri anti-loop per chunk
+    args.push("--max-context", "128", "--entropy-thold", "2.4", "--logprob-thold", "-1.0", "--max-len", "0");
+    args.push("--max-context", "128", "--entropy-thold", "2.4", "--logprob-thold", "-1.0", "--max-len", "0");
+    args.push("--best-of", "1", "--no-timestamps", "--word-thold", "0.01");
+    
+    // Output su file temporaneo
+    const tempTxtPath = chunkPath.replace(/\.mp3$/i, ".txt");
+    const outPrefix = chunkPath.replace(/\.mp3$/i, "");
+    args.push("-otxt", "-of", outPrefix);
+    
+    this.appendLog(`Transcribing chunk ${chunkIndex}: ${path.basename(chunkPath)}`);
+    
+    const stdoutBuf: string[] = [];
+    let stderrBuf = "";
+    
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(whisperMainPath, args, { cwd: path.dirname(chunkPath) });
+      child.stdout?.on("data", (d: Buffer) => stdoutBuf.push(d.toString()));
+      child.stderr?.on("data", (d: Buffer) => { stderrBuf += d.toString(); });
+      child.on("error", (err: any) => reject(err));
+      child.on("close", (code: number) => {
+        if (code === 0) resolve(); else reject(new Error(`whisper chunk ${chunkIndex} failed: ${stderrBuf}`));
+      });
+    });
+    
+    // Leggi trascrizione
+    let transcript = "";
+    try {
+      if (fs.existsSync(tempTxtPath)) {
+        transcript = String(fs.readFileSync(tempTxtPath, { encoding: "utf8" })).trim();
+        fs.unlinkSync(tempTxtPath); // Pulisci subito
+      }
+    } catch {}
+    if (!transcript) transcript = stdoutBuf.join("").trim();
+    
+    return transcript;
   }
 }
 

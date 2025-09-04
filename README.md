@@ -116,7 +116,7 @@ If you want **everything to run locally** (without sending any data to external 
 - In Obsidian → Resonance → LLM:
   - Set the provider to "Ollama"
   - Enter the endpoint (default: `http://localhost:11434`)
-  - Choose a supported model (e.g. `llama3.1` or others available via `ollama pull <model>`)
+  - Choose a supported model (e.g. `qwen3:8b` or others available via `ollama pull <model>`)
 
 **Note:** With this setup, both transcription (whisper.cpp) and note generation (LLM) are performed entirely on your computer, with no data sent externally.
 

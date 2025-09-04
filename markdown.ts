@@ -1,3 +1,5 @@
+// This module provides a function to normalize the markdown.
+
 export function normalizeCheckboxes(markdown: string): string {
   try {
     const lines = markdown.split(/\r?\n/);

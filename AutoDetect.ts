@@ -1,3 +1,9 @@
+// This module provides functions for automatically detecting the paths of FFmpeg and whisper.cpp executables
+// across different operating systems. Specifically, it attempts to locate FFmpeg using system commands
+// ('which' on Unix/macOS, 'where' on Windows) and, if unsuccessful, checks several known common locations
+// for each system. Additionally, it offers a function to detect the main whisper.cpp executable
+// starting from the repository folder, verifying the presence of executable files in typical subfolders.
+
 export async function autoDetectFfmpeg(): Promise<string | null> {
   try {
     const { spawn } = (window as any).require('child_process');
