@@ -537,7 +537,7 @@ export class RecorderService {
       if (!file) {
         try {
           const existing = vault.getAbstractFileByPath(notePath) as TFile | null;
-          file = existing || await vault.create(notePath, `# Live transcript\n\n`);
+          file = existing || await vault.create(notePath, ``);
           this.liveNoteFile = file;
         } catch {}
       }

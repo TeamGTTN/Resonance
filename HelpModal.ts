@@ -103,7 +103,8 @@ export class HelpModal extends Modal {
       case 'llm':
         return [
           { title: 'API Key', paragraphs: ['Create an API Key (Google AI Studio or other) and paste it in Settings. Select the model you prefer.'] },
-          { title: 'Privacy', paragraphs: ['Only the text transcript is sent to the service for summarization, audio stays local.'] },
+          { title: 'Ollama', paragraphs: ['For complete local and free setup (highly suggested), install Ollama following the official instructions for your operating system. Start Ollama (`ollama serve`). In Settings → Resonance, set the provider to "Ollama" and enter the endpoint (default: `http://localhost:11434`). Choose a supported model (e.g. `qwen3:8b` or others available via `ollama pull <model>`).'] },
+          { title: 'Privacy', paragraphs: ['Only the text transcript is sent to the service for summarization, audio stays local. If you use Ollama, everything runs locally, no data is sent externally.'] },
         ];
       case 'devices':
         return [

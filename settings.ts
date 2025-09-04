@@ -83,40 +83,32 @@ export class ResonanceSettingTab extends PluginSettingTab {
   async display() {
     const { containerEl } = this;
     containerEl.empty();
+    containerEl.addClass('resonance-settings');
 
-    containerEl.createEl("h3", { text: "Resonance" });
-
-    containerEl.createEl("p", { 
-      text: "Thanks for using Resonance :)"
-    });
-    containerEl.createEl("p", { 
-      text: "I know, setup can be a bit of a hassle... but once you’re done, you’ll be recording and transcribing like a pro! Take a few minutes to complete all the steps,future you will thank you."
-    });
-    
-    containerEl.createEl("p", {
-      text: "After you've completed the setup, use the microphone icon in the ribbon to start/stop, select a scenario from the menu that appears, and watch the timer in the status bar. "
-    });
-
-    containerEl.createEl("p", {
-      text: "When finished, a note will be created in the Notes folder you've selected. You can also open the Library (audio file icon) to listen, copy the transcription, or manage recordings."
-    });
-
-    // Project quick links (top)
-    const projectLinks = new Setting(containerEl)
+    const hero = containerEl.createEl('div', { cls: 'res-hero' });
+    hero.createEl('h2', { text: 'Resonance' });
+    hero.createEl('p', { text: `Welcome to Resonance! :)`});
+    hero.createEl('br');
+    hero.createEl('p', { text: `The initial setup might seem a bit tricky and a little boring, but you only have to do it once, and it's absolutely worth it.`});
+    hero.createEl('br');
+    hero.createEl('p', { text: `Once everything is ready, just hit the microphone icon in the ribbon, pick your scenario, and start recording. Your transcript and summary note will be waiting for you in the vault when you're done. Enjoy!`});
+    const heroActions = hero.createEl('div', { cls: 'res-actions' });
+    const projectLinks = new Setting(heroActions as any)
     projectLinks.addButton((btn)=> btn.setButtonText("GitHub Repo").onClick(()=>{
       try { const electron = (window as any).require('electron'); electron?.shell?.openExternal?.('https://github.com/TeamGTTN/Resonance'); } catch {}
     }));
 
-    // STEP 1: FFmpeg
-    containerEl.createEl("h3", { text: "FFmpeg" });
-    containerEl.createEl("p", { text: "Used to capture audio from your microphone and system audio." });
+    // FFmpeg (card)
+    const cardFfmpeg = containerEl.createEl('div', { cls: 'res-card' });
+    cardFfmpeg.createEl('h3', { text: 'FFmpeg' });
+    cardFfmpeg.createEl('p', { cls: 'desc', text: 'Used to capture audio from your microphone and system audio.' });
 
-    new Setting(containerEl)
+    new Setting(cardFfmpeg)
     .setName("Installation")
     .setDesc("Install on macOS via Homebrew, Windows static build, or Linux via package manager.")
     .addButton((btn)=> btn.setButtonText("Guide").onClick(()=> new HelpModal(this.app, 'ffmpeg').open()));
 
-    const ffmpegSetting = new Setting(containerEl)
+    const ffmpegSetting = new Setting(cardFfmpeg)
       .setName("FFmpeg path")
       .setDesc("Choose the ffmpeg executable or use Detect to auto‑find.")
       .addText(text =>
@@ -132,17 +124,18 @@ export class ResonanceSettingTab extends PluginSettingTab {
       else new Notice('No FFmpeg found');
     }));
 
-    // STEP 2: Whisper
-    containerEl.createEl("h3", { text: "Whisper" });
-    containerEl.createEl("p", { text: "Used to transcribe audio locally." });
+    // Whisper (card)
+    const cardWhisper = containerEl.createEl('div', { cls: 'res-card' });
+    cardWhisper.createEl('h3', { text: 'Whisper' });
+    cardWhisper.createEl('p', { cls: 'desc', text: 'Local transcription via whisper.cpp' });
 
-    new Setting(containerEl)
+    new Setting(cardWhisper)
     .setName("Installation")
     .setDesc("Manual installation required.")
     .addButton((btn)=> btn.setButtonText("Guide").onClick(()=> new HelpModal(this.app, 'whisper').open()));
 
     // Campo di testo allargato per il percorso della repo whisper.cpp
-    new Setting(containerEl)
+    new Setting(cardWhisper)
       .setName("whisper.cpp repo path")
       .setDesc("Root folder of the repo (es: /path/whisper.cpp)")
       .addText(text => {
@@ -153,7 +146,7 @@ export class ResonanceSettingTab extends PluginSettingTab {
           .inputEl.style.width = "300px"
       });
 
-    const whisperSetting = new Setting(containerEl)
+    const whisperSetting = new Setting(cardWhisper)
       .setName("whisper-cli executable")
       .setDesc("Auto‑resolved from repo, you may need to manually select the correct file.")
       .addText(text =>
@@ -169,7 +162,7 @@ export class ResonanceSettingTab extends PluginSettingTab {
       else new Notice('whisper-cli not found. Build the repo (cmake/make).');
     }));
 
-    const modelPreset = new Setting(containerEl)
+    const modelPreset = new Setting(cardWhisper)
       .setName("Model")
       .setDesc("Choose the model size. It will be downloaded automatically if missing.")
       .addDropdown(drop => {
@@ -187,7 +180,7 @@ export class ResonanceSettingTab extends PluginSettingTab {
       } catch (e: any) { new Notice('Download error: ' + (e?.message ?? e)); }
     }));
 
-    new Setting(containerEl)
+    new Setting(cardWhisper)
       .setName("Whisper model (.bin)")
       .setDesc("Full path to the model.")
       .addText(text =>
@@ -198,7 +191,7 @@ export class ResonanceSettingTab extends PluginSettingTab {
           .inputEl.style.width = "300px"
       );
 
-    new Setting(containerEl)
+    new Setting(cardWhisper)
       .setName("Transcription language")
       .setDesc("Choose expected language or leave Automatic.")
       .addDropdown(drop => {
@@ -216,16 +209,17 @@ export class ResonanceSettingTab extends PluginSettingTab {
         drop.onChange(async (value)=> { await this.save({ whisperLanguage: value }); });
       });
 
-    // STEP 3: LLM
-    containerEl.createEl("h3", { text: "LLM" });
-    containerEl.createEl("p", { text: "Used to summarize the transcription." });
+    // LLM (card)
+    const cardLLM = containerEl.createEl('div', { cls: 'res-card' });
+    cardLLM.createEl('h3', { text: 'LLM' });
+    cardLLM.createEl('p', { cls: 'desc', text: 'Used to summarize the transcription.' });
 
-    new Setting(containerEl)
+    new Setting(cardLLM)
       .setName("Installation")
       .setDesc("Use your own API key.")
       .addButton((btn)=> btn.setButtonText("Guide").onClick(()=> new HelpModal(this.app, 'llm').open()));
 
-    new Setting(containerEl)
+    new Setting(cardLLM)
       .setName("Provider")
       .setDesc("Choose your LLM provider.")
       .addDropdown(drop => {
@@ -236,7 +230,7 @@ export class ResonanceSettingTab extends PluginSettingTab {
       });
 
     if ((this.settings.llmProvider || 'gemini') === 'gemini') {
-      const apiSetting = new Setting(containerEl)
+      const apiSetting = new Setting(cardLLM)
         .setName("Google Gemini API Key")
         .setDesc("Key is stored locally in your vault.")
         .addText(text =>
@@ -246,7 +240,7 @@ export class ResonanceSettingTab extends PluginSettingTab {
         );
       apiSetting.settingEl.querySelector("input")?.setAttribute("type", "password");
 
-      new Setting(containerEl)
+      new Setting(cardLLM)
         .setName("Gemini model")
         .setDesc("Available: 1.5‑pro, 2.5‑flash, 2.5‑pro.")
         .addDropdown(drop => {
@@ -259,46 +253,47 @@ export class ResonanceSettingTab extends PluginSettingTab {
     }
 
     if (this.settings.llmProvider === 'openai') {
-      const apiSetting = new Setting(containerEl)
+      const apiSetting = new Setting(cardLLM)
         .setName("OpenAI API Key")
         .setDesc("Key is stored locally in your vault.")
         .addText(text => text.setValue(this.settings.openaiApiKey || '').onChange(async (value)=>{ await this.save({ openaiApiKey: value }); }));
       apiSetting.settingEl.querySelector("input")?.setAttribute("type", "password");
-      new Setting(containerEl)
+      new Setting(cardLLM)
         .setName("OpenAI model")
         .addText(text => text.setPlaceholder("gpt-4o-mini").setValue(this.settings.openaiModel || 'gpt-4o-mini').onChange(async (value)=>{ await this.save({ openaiModel: value }); }));
     }
 
     if (this.settings.llmProvider === 'anthropic') {
-      const apiSetting = new Setting(containerEl)
+      const apiSetting = new Setting(cardLLM)
         .setName("Anthropic API Key")
         .setDesc("Key is stored locally in your vault.")
         .addText(text => text.setValue(this.settings.anthropicApiKey || '').onChange(async (value)=>{ await this.save({ anthropicApiKey: value }); }));
       apiSetting.settingEl.querySelector("input")?.setAttribute("type", "password");
-      new Setting(containerEl)
+      new Setting(cardLLM)
         .setName("Anthropic model")
         .addText(text => text.setPlaceholder("claude-3-5-sonnet-latest").setValue(this.settings.anthropicModel || 'claude-3-5-sonnet-latest').onChange(async (value)=>{ await this.save({ anthropicModel: value }); }));
     }
 
     if (this.settings.llmProvider === 'ollama') {
-      new Setting(containerEl)
+      new Setting(cardLLM)
         .setName("Endpoint")
         .setDesc("e.g., http://localhost:11434")
         .addText(text => text.setPlaceholder("http://localhost:11434").setValue(this.settings.ollamaEndpoint || 'http://localhost:11434').onChange(async (value)=>{ await this.save({ ollamaEndpoint: value }); }));
-      new Setting(containerEl)
+      new Setting(cardLLM)
         .setName("Model")
         .addText(text => text.setPlaceholder("qwen3:8b").setValue(this.settings.ollamaModel || 'qwen3:8b').onChange(async (value)=>{ await this.save({ ollamaModel: value }); }));
     }
 
-    // STEP 4: Audio devices
-    containerEl.createEl("h3", { text: "Audio devices" });
-    containerEl.createEl("p", { text: "Select backend and choose devices." });
+    // Audio devices (card)
+    const cardAudio = containerEl.createEl('div', { cls: 'res-card' });
+    cardAudio.createEl('h3', { text: 'Audio devices' });
+    cardAudio.createEl('p', { cls: 'desc', text: 'Select backend and choose devices.' });
 
-    new Setting(containerEl)
+    new Setting(cardAudio)
     .setName("Configuration")
     .addButton((btn)=> btn.setButtonText("Guide").onClick(()=> new HelpModal(this.app, 'devices').open()));
 
-    new Setting(containerEl)
+    new Setting(cardAudio)
       .setName("FFmpeg backend")
       .setDesc("Automatic picks based on OS, choose manually if needed.")
       .addDropdown(drop => {
@@ -311,16 +306,16 @@ export class ResonanceSettingTab extends PluginSettingTab {
         drop.onChange(async (value) => { await this.save({ ffmpegInputFormat: value as ResonanceSettings["ffmpegInputFormat"] }); });
       });
 
-    const micSetting = new Setting(containerEl).setName("Microphone").setDesc("Choose from the list after scanning.");
+    const micSetting = new Setting(cardAudio).setName("Microphone").setDesc("Choose from the list after scanning.");
     const micSelect = micSetting.settingEl.createEl("select");
     micSelect.addClass("resonance-inline-select");
 
-    const sysSetting = new Setting(containerEl).setName("System audio").setDesc("Choose after scanning. Leave empty if not available.");
+    const sysSetting = new Setting(cardAudio).setName("System audio").setDesc("Choose after scanning. Leave empty if not available.");
     const sysSelect = sysSetting.settingEl.createEl("select");
     sysSelect.addClass("resonance-inline-select");
     const none = document.createElement('option'); none.value=''; none.text='(none)'; sysSelect.appendChild(none);
 
-    new Setting(containerEl)
+    new Setting(cardAudio)
       .setName("Device tools")
       .setDesc("Refresh devices and test audio config.")
       .addButton((btn) => btn.setButtonText("Refresh devices").onClick(async () => { await this.performScanAndPopulate(micSelect, sysSelect); }))
@@ -336,19 +331,13 @@ export class ResonanceSettingTab extends PluginSettingTab {
       await this.save({ ffmpegSystemDevice: selected.value, ffmpegSystemLabel: selected.text });
     });
 
-    // STEP 5: Obsidian
-    containerEl.createEl("h3", { text: "Obsidian" });
-    containerEl.createEl("p", { text: "Choose the folder where generated notes will be saved." });
+    // Obsidian section moved to bottom
 
-    const obs = new Setting(containerEl)
-      .setName("Notes folder")
-      .setDesc("Example: Meeting Notes, if empty, root of the vault.")
-      .addText(text => text.setPlaceholder("Meeting Notes").setValue(this.settings.outputFolder).onChange(async (value) => { await this.save({ outputFolder: value.trim() }); }));
+    // Recording (card)
+    const cardRec = containerEl.createEl('div', { cls: 'res-card' });
+    cardRec.createEl('h3', { text: 'Recording' });
 
-    // STEP 6: Recording
-    containerEl.createEl("h3", { text: "Recording" });
-
-    new Setting(containerEl)
+    new Setting(cardRec)
       .setName("Sample rate (Hz)")
       .setDesc("Typical: 44100 or 48000")
       .addText((text) =>
@@ -361,7 +350,7 @@ export class ResonanceSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
+    new Setting(cardRec)
       .setName("Channels")
       .setDesc("1 = mono, 2 = stereo")
       .addDropdown((drop) => {
@@ -372,7 +361,7 @@ export class ResonanceSettingTab extends PluginSettingTab {
         drop.onChange(async (value) => { await this.save({ recordChannels: Number(value) }); });
       });
 
-    new Setting(containerEl)
+    new Setting(cardRec)
       .setName("Bitrate (kbps)")
       .setDesc("MP3 bitrate. Typical: 160 – 256")
       .addText((text) =>
@@ -384,7 +373,7 @@ export class ResonanceSettingTab extends PluginSettingTab {
             await this.save({ recordBitrateKbps: v });
           })
       );
-    new Setting(containerEl)
+    new Setting(cardRec)
       .setName("Max recordings kept")
       .setDesc("0 = infinite, older ones will be deleted automatically.")
       .addText((text) =>
@@ -396,13 +385,20 @@ export class ResonanceSettingTab extends PluginSettingTab {
             await this.save({ maxRecordingsKept: v });
           })
       );
-    new Setting(containerEl)
+    // Obsidian (card) as last
+    const cardObs = containerEl.createEl('div', { cls: 'res-card' });
+    cardObs.createEl('h3', { text: 'Obsidian' });
+    cardObs.createEl('p', { cls: 'desc', text: 'Choose the folder where generated notes will be saved. You can also open the Library.' });
+    const obs = new Setting(cardObs)
+      .setName("Notes folder")
+      .setDesc("Example: Meeting Notes, if empty, root of the vault.")
+      .addText(text => text.setPlaceholder("Meeting Notes").setValue(this.settings.outputFolder).onChange(async (value) => { await this.save({ outputFolder: value.trim() }); }));
+    new Setting(cardObs)
       .setName("Open Library")
       .setDesc("See recordings list and actions")
       .addButton((btn)=> btn.setButtonText("Open").onClick(()=>{
-        try {
-          new LibraryModal(this.app, this.pluginId).open();
-        } catch (e: any) { new Notice(`Failed to open Library: ${e?.message ?? e}`); }
+        try { new LibraryModal(this.app, this.pluginId).open(); }
+        catch (e: any) { new Notice(`Failed to open Library: ${e?.message ?? e}`); }
       }));
   }
 
