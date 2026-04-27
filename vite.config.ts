@@ -4,10 +4,10 @@ import { builtinModules } from 'module';
 export default defineConfig({
   build: {
     lib: {
-      entry: 'main.ts',
+      entry: 'src/main.ts',
       formats: ['cjs'],
       fileName: () => 'main',
-      name: 'resonance',
+      name: 'resonanceNext',
     },
     outDir: 'dist',
     emptyOutDir: true,

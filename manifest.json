@@ -1,9 +1,9 @@
 {
-  "id": "resonance",
+  "id": "resonance-next",
   "name": "Resonance",
-  "version": "0.0.4",
+  "version": "0.1.0",
   "minAppVersion": "1.5.0",
-  "description": "Record meetings, lectures, interviews, and more. Transcribe locally, summarize with AI, and create notes in Obsidian. Free and open source.",
+  "description": "A local first AI Obsidian recorder with resilient live transcription, diagnostics, and session based notes.",
   "author": "Michael Gorini",
   "authorUrl": "",
   "isDesktopOnly": true

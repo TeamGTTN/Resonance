@@ -1,13 +1,15 @@
 {
-  "name": "resonance",
-  "version": "1.0.0",
+  "name": "resonance-next",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "Obsidian plugin: registra, trascrive con whisper.cpp, riassume con Gemini.",
+  "description": "Obsidian plugin v2: local-first recording, live transcription, diagnostics, and resilient note generation.",
   "scripts": {
     "dev": "node ./node_modules/vite/bin/vite.js build --watch",
     "build": "node ./node_modules/vite/bin/vite.js build && node scripts/postbuild.mjs",
-    "clean": "node -e \"import('fs').then(fs=>{try{fs.rmSync('dist',{recursive:true,force:true});}catch{}})\""
+    "clean": "node -e \"import('fs').then(fs=>{for(const dir of ['dist','.test-dist']){try{fs.rmSync(dir,{recursive:true,force:true});}catch{}}})\"",
+    "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
+    "test": "node ./node_modules/typescript/bin/tsc -p tsconfig.tests.json && node -e \"import('fs').then(fs=>fs.writeFileSync('.test-dist/package.json', JSON.stringify({type:'commonjs'})))\" && node --test .test-dist/tests/**/*.test.js"
   },
   "devDependencies": {
     "@types/node": "^22.18.0",

@@ -1,204 +1,117 @@
-<p align="center">
-  <a href="https://obsidian.md/" target="_blank" rel="noopener">
-    <img alt="Resonance" src="https://img.shields.io/badge/Obsidian-Community%20Plugin-7c3aed?logo=obsidian&logoColor=white" />
-  </a>
-  <img alt="Desktop only" src="https://img.shields.io/badge/Desktop-only-informational" />
-  <img alt="Requires FFmpeg" src="https://img.shields.io/badge/Requires-FFmpeg-green" />
-  <img alt="Transcription via whisper.cpp" src="https://img.shields.io/badge/Transcription-whisper.cpp-orange" />
-</p>
+# Resonance
 
-<div align="center">
-  <h2>Resonance</h2>
-  <p>
-    Record → Transcribe → Summarize → Create note. <br/>
-    A local‑first recording & meeting notes workflow for Obsidian.
-  </p>
-  <p>
-    <a href="#installation">Installation</a> ·
-    <a href="#configuration">Configuration</a> ·
-    <a href="#usage">Usage</a> ·
-    <a href="#settings">Settings</a> ·
-    <a href="#troubleshooting">Troubleshooting</a>
-  </p>
-  <p>
-    <a href="https://github.com/TeamGTTN/Resonance" target="_blank" rel="noopener">
-      <img alt="GitHub Repo" src="https://img.shields.io/badge/GitHub-Resonance-black?logo=github" />
-    </a>
-    <a href="https://buymeacoffee.com/michaelgorini" target="_blank" rel="noopener">
-      <img alt="Donate" src="https://img.shields.io/badge/Donate-Buy%20me%20a%20coffee-yellow" />
-    </a>
-  </p>
-</div>
+Resonance is the clean-slate v2 of the Obsidian recording plugin. The product is now built around a local-first pipeline, settings-first setup, and manifest-backed session storage.
 
-## What it does
+## Fastest Setup
 
-Resonance captures audio with FFmpeg, transcribes it locally using whisper.cpp, summarizes the transcript with the LLM of your choice, and creates a Markdown note in your vault, all from Obsidian.
+If this machine already has `FFmpeg`, a built `whisper.cpp`, and at least one local ggml model:
 
-## Features
+1. Open the plugin settings page.
+2. Work through **Step 1**, **Step 2**, and **Step 3** from top to bottom.
+3. Use the Detect buttons to fill paths automatically when possible.
+4. Pick a microphone and run **Quick test**.
+5. Leave **Ollama** as the provider unless you intentionally want a cloud provider.
 
-- 🎙️ Record microphone and optionally system audio
-- 🧠 Local transcription via whisper.cpp
-- ✨ AI summary (Gemini, OpenAI, Claude, Ollama)
-- 📚 Library to review, play, download or delete recordings/transcripts
+The settings page is now the full setup flow. Nothing important is hidden behind a separate setup modal.
 
-## Requirements
+## What Changed
 
-- Obsidian Desktop ≥ 1.5
-- FFmpeg installed locally
-- whisper.cpp built locally (binary and model .bin)
-- LLM API Key or local Ollama (for summaries)
+- `src/` is the only active application tree for v2.
+- The primary entrypoint is now the plugin settings surface instead of a simple start/stop flow.
+- Recording state is driven by an explicit session controller with ordered live transcription.
+- Sessions are stored as structured manifests with `audio/`, `transcript/`, `summary/`, and `diagnostics.log`.
+- The session library is manifest-backed. It no longer scans raw media files blindly.
 
-## Manual Installation
+## Product Direction
 
-User install from release:
-1) Download the zip containing `manifest.json`, `main.js`, `styles.css`.
-2) Create `<YourVault>/.obsidian/plugins/resonance/`.
-3) Copy the three files there and enable the plugin in Obsidian.
+- Desktop-only Obsidian plugin
+- Local-first path: `FFmpeg` + `whisper.cpp` + `Ollama`
+- Cloud summary providers remain available as secondary adapters
+- Native Obsidian settings are now the primary surface, with horizontal tabs for diagnostics, library, and setup
 
-## Configuration
+## Current Information Architecture
 
-Follow these steps once to fully set up recording, local transcription and summarization.
+- Diagnostics
+  - Health status and blocking issues
+  - Quick test
+  - Startup behavior
+  - Setup guidance when the local path is incomplete
+- Setup & Settings
+  - Horizontal tabs for Diagnostics, Library, Capture, Transcription, Summary, and Output
+  - Capture tab for FFmpeg, devices, and quick test
+  - Transcription tab for whisper.cpp, CLI, and model
+  - Summary tab for Ollama or cloud providers
+  - Output tab for vault, retention, and startup behavior
+- Session Library
+  - Filters for `done` and `failed`
+  - Artifact availability
+  - Transcript, diagnostics, audio, and summary actions
 
-### 1) FFmpeg
+## Repository Layout
 
-- macOS:
-  - Install with Homebrew: `brew install ffmpeg`
-  - Typical path: `/opt/homebrew/bin/ffmpeg` (Apple Silicon) or `/usr/local/bin/ffmpeg` (Intel)
-- Windows:
-  - Download a static build (e.g. from the BtbN or Gyan packages)
-  - Unzip to `C:/ffmpeg/` so the executable is at `C:/ffmpeg/bin/ffmpeg.exe`
-  - Optionally add `C:/ffmpeg/bin` to PATH, or set the full path in settings
-- Linux:
-  - Install via your package manager, e.g. Debian/Ubuntu: `sudo apt install ffmpeg`, Fedora: `sudo dnf install ffmpeg`
+```text
+src/            Active Resonance v2 source
+tests/          Pure unit tests for v2
+legacy/         Archived v1 runtime files kept for reference
+dist/           Build output
+```
 
-In Obsidian → Resonance → FFmpeg:
-- Set “FFmpeg path” or click “Detect”. On macOS you may need to grant microphone permissions to Obsidian.
+## Local Development
 
-### 2) whisper.cpp (local transcription)
+Requirements:
 
-Clone and build the project, then select the `whisper-cli` binary.
+- Obsidian desktop
+- Node.js
+- FFmpeg
+- whisper.cpp with a local model
+- Ollama if you want the full tier-1 local path
 
-- macOS/Linux (generic):
+Commands:
+
 ```bash
-git clone https://github.com/ggerganov/whisper.cpp
-cd whisper.cpp
-cmake -S . -B build
-cmake --build build -j
+npm run typecheck
+npm test
+npm run build
 ```
-  - The executable is typically at `build/bin/whisper-cli`
-- Windows (CMake + MSVC):
-  - Install CMake and Visual Studio Build Tools
-  - From a Developer PowerShell:
-```powershell
-git clone https://github.com/ggerganov/whisper.cpp
-cd whisper.cpp
-cmake -S . -B build -A x64
-cmake --build build --config Release
-```
-  - The executable is typically at `build/bin/Release/whisper-cli.exe`
 
-In Obsidian → Resonance → Whisper:
-- Set “whisper.cpp repo path”, then click “Detect” to auto‑find `whisper-cli`, or set it manually.
-- Pick a model preset and click “Download”, or set a model `.bin` path manually.
-- Choose the “Transcription language” (or leave Automatic).
+## Install In Obsidian
 
-Models (manual download): see the official ggml models, e.g. small/medium/large. Place the `.bin` in `<repo>/models/` and select it in settings.
+1. Build the plugin with `npm run build`.
+2. Copy `dist/main.js`, `dist/manifest.json`, and `dist/styles.css` into your vault plugin folder.
+3. Enable `Resonance` in Obsidian community plugins.
+4. Open the plugin settings page.
+5. Use the `Capture` tab for FFmpeg and devices, then `Transcription` and `Summary`.
+6. When setup is done, use the `Diagnostics` tab for health and the `Library` tab for saved session artifacts.
 
-### 3) LLM
+## Minimum Local Requirements
 
-- Create an API key from Google AI Studio or the LLM of your choice.
-- In Obsidian → Resonance → LLM: paste the key and pick the model.
+To record and summarize locally, Resonance needs:
 
-If you want **everything to run locally** (without sending any data to external services), you can use [Ollama](https://ollama.com/) as your LLM provider:
+- `FFmpeg`
+- `whisper.cpp` CLI
+- a readable local ggml model file
+- `Ollama` running locally for summaries
 
-- Install Ollama following the official instructions for your operating system.
-- Start Ollama (`ollama serve`).
-- In Obsidian → Resonance → LLM:
-  - Set the provider to "Ollama"
-  - Enter the endpoint (default: `http://localhost:11434`)
-  - Choose a supported model (e.g. `qwen3:8b` or others available via `ollama pull <model>`)
+If auto-detect fails, the manual fallback is:
 
-**Note:** With this setup, both transcription (whisper.cpp) and note generation (LLM) are performed entirely on your computer, with no data sent externally.
+1. Point Step 3 in plugin settings at your `whisper.cpp` repo.
+2. Detect or set the `whisper.cpp` CLI path.
+3. Detect or set the ggml model path.
+4. Return to Step 2 and run the quick test.
 
-### 4) Audio devices (mic and system audio)
+## Runtime Model
 
-Select the proper backend for your OS and pick devices from the scanned list.
+Each session persists:
 
-- Backend:
-  - macOS: `avfoundation`
-  - Windows: `dshow`
-  - Linux: `pulse` (or `alsa`)
-  - “Automatic” chooses based on OS
+- `session.json`
+- `audio/recording.mp3`
+- `audio/segments/`
+- `transcript/live-transcript.txt`
+- `summary/summary.md`
+- `diagnostics.log`
 
-- macOS system audio:
-  - Install a virtual loopback driver (e.g. BlackHole 2ch)
-  - Route system output to that device (or create a Multi‑Output/aggregate device if needed)
-  - Click “Refresh devices”, then select your mic and the virtual device as “System audio”
+The live transcription queue commits segments strictly in order and the stop flow waits for the queue to flush before summary generation starts.
 
-- Windows system audio:
-  - Install VB‑Audio Cable or VoiceMeeter
-  - Set Windows output to the virtual device (or use “Stereo Mix” if available)
-  - Click “Refresh devices”, pick mic and the virtual device for “System audio”
+## Notes On Legacy Code
 
-- Linux system audio:
-  - With PulseAudio, choose the monitor of your output sink (e.g. `alsa_output.*.monitor`)
-  - Click “Refresh devices”, then select mic and the monitor device
-
-Use “Test audio config” to record a 1‑second MP3. If it fails, verify permissions, backend, and selected devices.
-
-### 5) Obsidian output
-
-- Set the “Notes folder” where Resonance will create the generated Markdown notes. If empty, the vault root is used.
-
-### 6) Recording quality and limits
-
-- Adjust sample rate, channels (mono/stereo), MP3 bitrate, and “Max recordings kept”. Older items beyond the limit are auto‑deleted (0 = infinite).
-
-### 7) Done!
-
-- You may need to restart Obsidian after changing settings.
-
-### First run checklist
-
-- FFmpeg path set and working (test passes)
-- Whisper repo path + `whisper-cli` set
-- Model `.bin` selected (or downloaded)
-- API key and model set
-- Mic and (optional) system audio selected
-- Notes folder set
-
-## Usage
-
-1) Click the microphone icon in the ribbon to start/stop. Pick a scenario when prompted.  
-2) Watch the timer in the status bar.  
-3) When finished, a note named `<Scenario> YYYY-MM-DD HH-mm.md` is created in your selected folder.  
-4) Open the Library (audio file icon) to browse, listen, download or delete recordings and transcripts.
-
-## How it works (overview)
-
-1) FFmpeg writes an `.mp3` to `<vault>/.obsidian/plugins/resonance/recordings/`  
-2) whisper.cpp transcribes locally and writes a `.txt` transcript  
-3) The LLM of your choice summarizes the transcript  
-4) Resonance creates a Markdown note in your chosen folder
-
-## Privacy
-
-- Audio never leaves your machine.
-- Only the text transcript is sent for summarization—unless you use Ollama, in which case everything stays local.
-- The API Key is stored locally in your vault.
-
-## Troubleshooting
-
-- Incomplete configuration: set FFmpeg path, whisper main, model, and API key.
-- No audio: verify backend/device; use Scan and the 3‑second Test.
-- Noise in recordings: match the sample rate in settings with your mic.
-- Empty transcription: check the `.mp3` file and the model path.
-- LLM error: verify API key and selected model.
-
-## Contributing
-
-Issues and PRs are welcome. If you’d like to help with docs or UX, please open an issue to coordinate.
-
----
-
-Built with Vite. This plugin is desktop‑only.
+The previous implementation is archived under `legacy/`. It is not part of the active v2 runtime, build entry, or test surface.

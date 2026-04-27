@@ -222,7 +222,13 @@ async function summarizeWithOllama(cfg: LlmConfig, prompt: string, transcript: s
     model: cfg.model || 'qwen3:8b',
     prompt: fullPrompt,
     stream: false,
-    options: { temperature: 0 },
+    options: {
+      temperature: 0,
+      top_p: 0.9,
+      top_k: 40,
+      // Aumenta la lunghezza massima dell'output per riassunti lunghi
+      num_predict: 2048
+    },
   };
   const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!res.ok) throw new Error(`Ollama API error: ${res.status} ${await res.text().catch(()=> '')}`);

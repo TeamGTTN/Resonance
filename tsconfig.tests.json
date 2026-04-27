@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "lib": ["ES2020", "DOM"],
+    "strict": true,
+    "esModuleInterop": true,
+    "types": ["node"],
+    "outDir": ".test-dist",
+    "rootDir": ".",
+    "skipLibCheck": true
+  },
+  "include": [
+    "src/domain/**/*.ts",
+    "src/application/OrderedSegmentQueue.ts",
+    "src/application/dashboard.ts",
+    "src/infrastructure/system/autoDetect.ts",
+    "src/infrastructure/system/deviceScanner.ts",
+    "tests/**/*.ts"
+  ]
+}

@@ -80,6 +80,12 @@ export class RecorderService {
   async start() {
     if (this.phase !== "idle" && this.phase !== "error" && this.phase !== "done") return;
     try {
+      // Reset stato di sessione precedente
+      this.liveNoteFile = null;
+      (this as any).liveVaultFolder = null;
+      try { this.liveProcessedSegments.clear(); } catch {}
+      try { for (const t of this.livePendingTimers.values()) clearTimeout(t); } catch {}
+      try { this.livePendingTimers.clear(); } catch {}
       await this.prepareAudioPath();
       await this.beginRecording();
     } catch (e: any) {
@@ -518,7 +524,7 @@ export class RecorderService {
 
   private async ensureLiveNoteOpen() {
     try {
-      const date = window.moment().format("YYYY-MM-DD HH-mm");
+      const date = window.moment().format("YYYY-MM-DD HH-mm-ss");
       let scenarioLabel: string | null = null;
       try {
         const { PROMPT_PRESETS, DEFAULT_PROMPT_KEY } = await import('./prompts');
@@ -533,14 +539,12 @@ export class RecorderService {
       const vault = this.app.vault;
       try { await (vault as any).createFolder(folderPath); } catch {}
       const notePath = `${folderPath}/Live transcript.md`;
-      let file = this.liveNoteFile;
-      if (!file) {
-        try {
-          const existing = vault.getAbstractFileByPath(notePath) as TFile | null;
-          file = existing || await vault.create(notePath, ``);
-          this.liveNoteFile = file;
-        } catch {}
-      }
+      let file: TFile | null = null;
+      try {
+        const existing = vault.getAbstractFileByPath(notePath) as TFile | null;
+        file = existing || await vault.create(notePath, `# Live transcript\n\n`);
+        this.liveNoteFile = file;
+      } catch {}
       const leaf = this.app.workspace.getLeaf(true);
       await leaf.openFile(this.liveNoteFile as TFile);
     } catch {}
