@@ -43,3 +43,27 @@ test("collectSegmentDescriptors includes the newest segment during stop flush", 
 
   assert.deepEqual(segments, [{ index: 0, path: "/tmp/segment-0000.mp3" }]);
 });
+
+test("collectSegmentDescriptors accepts wav segments from web capture", () => {
+  const now = 10_000;
+  const segments = collectSegmentDescriptors(
+    [
+      {
+        name: "segment-0000.wav",
+        path: "/tmp/segment-0000.wav",
+        mtimeMs: now - 5_000,
+        isFile: true,
+      },
+      {
+        name: "segment-0001.wav",
+        path: "/tmp/segment-0001.wav",
+        mtimeMs: now - 100,
+        isFile: true,
+      },
+    ],
+    now,
+    false
+  );
+
+  assert.deepEqual(segments, [{ index: 0, path: "/tmp/segment-0000.wav" }]);
+});

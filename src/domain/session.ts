@@ -1,5 +1,6 @@
 import type { DiagnosticsReport } from "./diagnostics";
 import type { SummaryProviderId } from "./providers";
+import type { CaptureEngine, SystemAudioMode } from "./settings";
 
 export const SESSION_STATES = [
   "idle",
@@ -37,13 +38,15 @@ export interface RecordingSessionPaths {
 }
 
 export interface RecordingSessionManifest {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2 | 3;
   sessionId: string;
   createdAt: string;
   updatedAt: string;
   scenarioKey: string;
   scenarioLabel: string;
-  captureMode: "microphone" | "microphone+system";
+  captureEngine?: CaptureEngine;
+  systemAudioMode?: SystemAudioMode;
+  captureMode: "microphone" | "microphone+system" | "system";
   status: SessionState;
   paths: RecordingSessionPaths;
   providerInfo: {
@@ -96,6 +99,9 @@ export interface SessionListItem {
   sessionId: string;
   scenarioKey: string;
   scenarioLabel: string;
+  captureEngine: CaptureEngine;
+  systemAudioMode: SystemAudioMode;
+  sourceLabel: string;
   createdAt: string;
   updatedAt: string;
   lastActivityAt: string;

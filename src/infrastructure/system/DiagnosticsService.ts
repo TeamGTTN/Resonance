@@ -4,19 +4,23 @@ import {
   getSelectedProviderApiKey,
   isLikelyTestWhisperModelPath,
   isCoreConfigured,
-  resolveCaptureBackend,
+  isLoopbackSystemAudioEnabled,
   type PluginSettingsV2,
 } from "../../domain/settings";
 import type { DiagnosticCheck, DiagnosticsReport } from "../../domain/diagnostics";
-import { CAPTURE_PROFILE_LABELS } from "../../domain/captureProfiles";
 import { requireNodeModule } from "../node";
-import { resolveCaptureInputs } from "../adapters/captureUtils";
+import { WebCaptureAdapter } from "../adapters/WebCaptureAdapter";
 import { WhisperTranscriptionAdapter } from "../adapters/TranscriptionAdapter";
-import { scanDevices } from "./deviceScanner";
+import {
+  getMicrophonePermissionState,
+  getWebAudioCapability,
+  listWebAudioInputDevices,
+} from "./webAudio";
 
 export interface SmokeTestResult {
   ok: boolean;
   detail: string;
+  cancelled?: boolean;
 }
 
 export class DiagnosticsService {
@@ -30,7 +34,8 @@ export class DiagnosticsService {
       statSync: (path: string) => { size: number };
     }>("fs");
     const checks: DiagnosticCheck[] = [];
-    const backend = resolveCaptureBackend(settings.capture.backend);
+    const loopbackEnabled = isLoopbackSystemAudioEnabled(settings.capture);
+    const backend = "web";
     const addCheck = (check: DiagnosticCheck) => checks.push(check);
     const fileMode = process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK;
 
@@ -49,19 +54,89 @@ export class DiagnosticsService {
       severity: isCoreConfigured(settings) ? "ok" : "error",
       detail: isCoreConfigured(settings)
         ? "Core local-first path is configured."
-        : "FFmpeg, whisper.cpp, model, or summary provider configuration is incomplete.",
+        : loopbackEnabled
+        ? "Web Audio capture is ready, but the additional source, transcription, or summary configuration is still incomplete."
+        : "Web Audio capture is ready, but transcription or summary configuration is still incomplete.",
       remediation: "Open Setup & Settings in the plugin settings tab and complete the missing dependency step.",
     });
 
+    const capability = getWebAudioCapability();
+    const permissionState = await getMicrophonePermissionState();
+    const deviceSnapshot = await listWebAudioInputDevices().catch(async () => ({
+      devices: [],
+      permissionState,
+      labelsAvailable: false,
+    }));
+
     addCheck({
-      id: "ffmpeg",
-      label: "FFmpeg binary",
-      severity: testPath(settings.capture.ffmpegPath, fileMode) ? "ok" : "error",
-      detail: settings.capture.ffmpegPath
-        ? `Configured path: ${settings.capture.ffmpegPath}`
-        : "FFmpeg path is empty.",
-      remediation: "Set the FFmpeg executable path or use auto-detect.",
+      id: "web-audio",
+      label: "Web Audio capture",
+      severity: capability.hasGetUserMedia && capability.hasEnumerateDevices ? "ok" : "error",
+      detail: capability.hasGetUserMedia && capability.hasEnumerateDevices
+        ? `Web Audio APIs are available${permissionState === "granted" ? " and microphone permission is granted." : permissionState === "prompt" ? ". Microphone permission will be requested on first recording." : permissionState === "denied" ? ", but microphone permission is denied." : "."}`
+        : "Required browser audio APIs are unavailable in this runtime.",
+      remediation:
+        permissionState === "denied"
+          ? "Re-enable microphone permission for Obsidian in the operating system settings."
+          : "Use Obsidian desktop on a Chromium-based runtime that exposes getUserMedia and enumerateDevices.",
     });
+
+    addCheck({
+      id: "device-scan",
+      label: "Audio input devices",
+      severity: deviceSnapshot.devices.length > 0 ? "ok" : "warning",
+      detail: deviceSnapshot.devices.length > 0
+        ? `${deviceSnapshot.devices.length} audio input${deviceSnapshot.devices.length === 1 ? "" : "s"} discovered via Web Audio.${deviceSnapshot.labelsAvailable ? "" : " Device labels will become more descriptive after microphone permission is granted."}`
+        : "No audio inputs were discovered via Web Audio.",
+      remediation: "Grant microphone permission and check the OS input devices if the list stays empty.",
+    });
+
+    const selectedMic = settings.capture.microphoneDevice.trim();
+    const selectedMicPresent = !selectedMic || deviceSnapshot.devices.some((device) => device.deviceId === selectedMic);
+    addCheck({
+      id: "selected-microphone",
+      label: "Selected microphone",
+      severity: selectedMicPresent ? "ok" : "warning",
+      detail: selectedMic
+        ? selectedMicPresent
+          ? "Selected microphone is available."
+          : "Selected microphone is unavailable. Recording will fall back to the system default input."
+        : "No specific microphone selected. Recording will use the system default input.",
+      remediation: "Choose a microphone device if you want to pin one instead of following the OS default.",
+    });
+
+    if (loopbackEnabled) {
+      const selectedAdditional = settings.capture.systemDevice.trim();
+      const selectedAdditionalPresent = Boolean(
+        selectedAdditional && deviceSnapshot.devices.some((device) => device.deviceId === selectedAdditional)
+      );
+      const duplicateSource =
+        Boolean(selectedAdditional) &&
+        selectedAdditionalPresent &&
+        selectedMic &&
+        selectedAdditional === selectedMic;
+
+      addCheck({
+        id: "selected-additional-source",
+        label: "Additional source",
+        severity: !selectedAdditional
+          ? "error"
+          : duplicateSource
+          ? "error"
+          : selectedAdditionalPresent
+          ? "ok"
+          : "warning",
+        detail: !selectedAdditional
+          ? "Additional source is enabled, but no second input device is selected."
+          : duplicateSource
+          ? "The additional source matches the microphone. Pick a different input such as BlackHole or VB-Cable."
+          : selectedAdditionalPresent
+          ? "Selected additional source is available."
+          : "Selected additional source is unavailable. Refresh devices or disable it.",
+        remediation:
+          "Select a second audioinput device such as BlackHole, VB-Cable, or a monitor source if you want multiple sources in the same recording.",
+      });
+    }
 
     addCheck({
       id: "whisper-cli",
@@ -80,54 +155,6 @@ export class DiagnosticsService {
       detail: getWhisperModelDetail(settings.transcription.modelPath, fs),
       remediation: getWhisperModelRemediation(settings.transcription.modelPath, fs),
     });
-
-    if (!settings.capture.microphoneDevice.trim()) {
-      addCheck({
-        id: "microphone",
-        label: "Microphone selection",
-        severity: "warning",
-        detail: "No microphone device selected yet.",
-        remediation: "Refresh devices and select the main microphone input.",
-      });
-    }
-
-    try {
-      if (settings.capture.ffmpegPath.trim()) {
-        const devices = await scanDevices(settings.capture.ffmpegPath, backend);
-        const audioDevices = devices.filter((device) => device.type === "audio");
-        const micPresent = !settings.capture.microphoneDevice.trim()
-          ? false
-          : audioDevices.some((device) => device.name === settings.capture.microphoneDevice || device.label === settings.capture.microphoneLabel);
-        addCheck({
-          id: "device-scan",
-          label: "Audio devices",
-          severity: audioDevices.length > 0 ? "ok" : "warning",
-          detail: audioDevices.length > 0
-            ? `${audioDevices.length} audio devices discovered for backend ${backend}.`
-            : `No audio devices discovered for backend ${backend}.`,
-          remediation: "Check OS permissions, FFmpeg backend, and input devices.",
-        });
-        if (settings.capture.microphoneDevice.trim()) {
-          addCheck({
-            id: "selected-microphone",
-            label: "Selected microphone",
-            severity: micPresent ? "ok" : "warning",
-            detail: micPresent
-              ? "Selected microphone is present in the current FFmpeg scan."
-              : "Selected microphone was not found in the current FFmpeg scan.",
-            remediation: "Refresh devices and reselect the microphone if indexes changed.",
-          });
-        }
-      }
-    } catch (error) {
-      addCheck({
-        id: "device-scan",
-        label: "Audio devices",
-        severity: "warning",
-        detail: `Device scan failed: ${String((error as Error)?.message ?? error)}`,
-        remediation: "Verify FFmpeg path and backend compatibility.",
-      });
-    }
 
     const providerCapabilities = getProviderCapabilities(settings.summary.provider);
     if (providerCapabilities.kind === "local") {
@@ -161,19 +188,6 @@ export class DiagnosticsService {
       remediation: "Set a dedicated output folder if you want generated notes grouped together.",
     });
 
-    const profileLabel = CAPTURE_PROFILE_LABELS[settings.capture.captureProfile];
-    const transcriptionWithNonStandardRate =
-      settings.capture.captureProfile === "transcription" && settings.capture.sampleRateHz !== 48000;
-    addCheck({
-      id: "capture-profile",
-      label: "Audio processing profile",
-      severity: transcriptionWithNonStandardRate ? "warning" : "ok",
-      detail: transcriptionWithNonStandardRate
-        ? `Profile: ${profileLabel}. Sample rate ${settings.capture.sampleRateHz} Hz with the Transcription profile can cause extra resampling artifacts. Consider switching to 48000 Hz.`
-        : `Profile: ${profileLabel}. Active on next recording.`,
-      remediation: "Switch to Balanced or Natural profile if audio sounds robotic, or set sample rate to 48000 Hz.",
-    });
-
     const blockingIssueIds = checks.filter((check) => check.severity === "error").map((check) => check.id);
     const warningIds = checks.filter((check) => check.severity === "warning").map((check) => check.id);
     return {
@@ -192,64 +206,58 @@ export class DiagnosticsService {
   }
 
   async runSmokeTest(settings: PluginSettingsV2): Promise<SmokeTestResult> {
-    if (!settings.capture.ffmpegPath.trim()) {
-      return { ok: false, detail: "FFmpeg path is missing." };
+    const capability = getWebAudioCapability();
+    const loopbackEnabled = isLoopbackSystemAudioEnabled(settings.capture);
+    if (!capability.hasGetUserMedia || !capability.hasEnumerateDevices) {
+      return { ok: false, detail: "Web Audio capture is unavailable in this runtime." };
     }
-    const resolvedInputs = await resolveCaptureInputs(settings.capture);
-    if (!resolvedInputs.micSpec) {
-      return { ok: false, detail: "No microphone input is configured." };
+
+    if (loopbackEnabled && !settings.capture.systemDevice.trim()) {
+      return { ok: false, detail: "Additional source is enabled, but no second input device is selected." };
     }
 
     const fs = requireNodeModule<{
-      mkdtempSync: (prefix: string) => string;
       existsSync: (path: string) => boolean;
-      unlinkSync: (path: string) => void;
+      mkdirSync: (path: string, options: { recursive: boolean }) => void;
+      mkdtempSync: (prefix: string) => string;
       rmSync: (path: string, options: { recursive: boolean; force: boolean }) => void;
     }>("fs");
     const os = requireNodeModule<{ tmpdir: () => string }>("os");
     const path = requireNodeModule<{ join: (...parts: string[]) => string }>("path");
-    const { spawn } = requireNodeModule<{ spawn: Function }>("child_process");
-    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "resonance-next-smoke-"));
-    const audioPath = path.join(tmpRoot, "smoke.mp3");
-    const args = [
-      "-y",
-      "-f",
-      resolvedInputs.backend,
-      "-thread_queue_size",
-      "1024",
-      "-i",
-      resolvedInputs.micSpec,
-      "-t",
-      String(settings.diagnostics.quickTestDurationSeconds),
-      "-vn",
-      "-ar",
-      String(settings.capture.sampleRateHz),
-      "-ac",
-      String(settings.capture.channels),
-      "-c:a",
-      "libmp3lame",
-      "-b:a",
-      `${settings.capture.bitrateKbps}k`,
-      audioPath,
-    ];
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "resonance-next-web-smoke-"));
+    const segmentsDir = path.join(tmpRoot, "segments");
+    const audioPath = path.join(tmpRoot, "smoke.wav");
+    if (!fs.existsSync(segmentsDir)) {
+      fs.mkdirSync(segmentsDir, { recursive: true });
+    }
 
+    const adapter = new WebCaptureAdapter();
     try {
-      await new Promise<void>((resolve, reject) => {
-        const child = spawn(settings.capture.ffmpegPath, args);
-        let stderr = "";
-        child.stderr?.on("data", (chunk: Buffer) => {
-          stderr += chunk.toString();
-        });
-        child.on("error", (error: Error) => reject(error));
-        child.on("close", (code: number) => {
-          if (code === 0) resolve();
-          else reject(new Error(stderr || `FFmpeg exited with code ${code}`));
-        });
+      await adapter.start({
+        fullAudioPath: audioPath,
+        segmentsDir,
+        segmentDurationSeconds: Math.max(1, settings.diagnostics.quickTestDurationSeconds),
+        microphoneDevice: settings.capture.microphoneDevice,
+        additionalSources:
+          loopbackEnabled && settings.capture.systemDevice.trim()
+            ? [
+                {
+                  deviceId: settings.capture.systemDevice.trim(),
+                  label: settings.capture.systemLabel.trim() || "Additional source",
+                },
+              ]
+            : [],
+        onSegmentReady: () => {},
       });
 
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, Math.max(300, settings.diagnostics.quickTestDurationSeconds * 1_000));
+      });
+      await adapter.stop();
+
       if (settings.transcription.whisperCliPath.trim() && settings.transcription.modelPath.trim() && fs.existsSync(audioPath)) {
-        const adapter = new WhisperTranscriptionAdapter(settings.transcription, settings.capture.ffmpegPath);
-        const transcript = await adapter.transcribeFile(audioPath);
+        const transcriptionAdapter = new WhisperTranscriptionAdapter(settings.transcription, settings.capture.ffmpegPath);
+        const transcript = await transcriptionAdapter.transcribeFile(audioPath);
         if (!transcript.trim()) {
           return { ok: false, detail: "Quick test recorded audio, but whisper.cpp returned an empty transcript." };
         }
@@ -264,6 +272,11 @@ export class DiagnosticsService {
     } catch (error) {
       return { ok: false, detail: String((error as Error)?.message ?? error) };
     } finally {
+      try {
+        if (adapter.isRunning()) {
+          await adapter.stop();
+        }
+      } catch {}
       try {
         fs.rmSync(tmpRoot, { recursive: true, force: true });
       } catch {}

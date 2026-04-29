@@ -20,20 +20,22 @@ const diagnosticsReport: DiagnosticsReport = {
 };
 
 const manifest: RecordingSessionManifest = {
-  schemaVersion: 1,
+  schemaVersion: 3,
   sessionId: "session-1",
   createdAt: "2026-04-22T08:00:00.000Z",
   updatedAt: "2026-04-22T08:30:00.000Z",
   scenarioKey: "work_meeting",
   scenarioLabel: "Meeting",
   captureMode: "microphone",
+  captureEngine: "web",
+  systemAudioMode: "off",
   status: "failed",
   paths: {
     rootDir: "/tmp/session-1",
     manifestPath: "/tmp/session-1/session.json",
     diagnosticsLogPath: "/tmp/session-1/diagnostics.log",
     audioDir: "/tmp/session-1/audio",
-    fullAudioPath: "/tmp/session-1/audio/recording.mp3",
+    fullAudioPath: "/tmp/session-1/audio/recording.wav",
     segmentsDir: "/tmp/session-1/audio/segments",
     transcriptDir: "/tmp/session-1/transcript",
     transcriptTextPath: "/tmp/session-1/transcript/live-transcript.txt",
@@ -87,6 +89,22 @@ test("deriveSessionListItem exposes dashboard and library metadata", () => {
   assert.equal(item.healthBadge, "failed");
   assert.equal(item.failureSummary, "Summary provider returned an empty result.");
   assert.equal(item.artifactAvailability.hasTranscript, true);
+  assert.equal(item.sourceLabel, "Microphone");
+});
+
+test("deriveSessionListItem labels multi-source web sessions clearly", () => {
+  const item = deriveSessionListItem(
+    {
+      ...manifest,
+      sessionId: "session-2",
+      captureMode: "microphone+system",
+      captureEngine: "web",
+      systemAudioMode: "loopback",
+    },
+    24_000
+  );
+
+  assert.equal(item.sourceLabel, "Microphone + additional source");
 });
 
 test("deriveSessionHealthBadge marks finalizing sessions as warning", () => {

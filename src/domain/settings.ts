@@ -2,8 +2,13 @@ import { getSelectedSummaryModel, type SummaryProviderId } from "./providers";
 
 export type CaptureBackend = "auto" | "avfoundation" | "dshow" | "pulse" | "alsa";
 export type CaptureProfile = "transcription" | "balanced" | "natural" | "custom";
+export type CaptureEngine = "web" | "ffmpeg";
+export type SystemAudioMode = "off" | "loopback" | "share";
+export type CaptureRuntimeKind = "web-mic" | "web-multi-input";
 
 export interface CaptureSettings {
+  captureEngine: CaptureEngine;
+  systemAudioMode: SystemAudioMode;
   ffmpegPath: string;
   backend: CaptureBackend;
   microphoneDevice: string;
@@ -74,6 +79,8 @@ export interface PluginSettingsV2 {
 export const DEFAULT_SETTINGS_V2: PluginSettingsV2 = {
   version: 2,
   capture: {
+    captureEngine: "web",
+    systemAudioMode: "off",
     ffmpegPath: "",
     backend: "auto",
     microphoneDevice: "",
@@ -81,7 +88,7 @@ export const DEFAULT_SETTINGS_V2: PluginSettingsV2 = {
     systemDevice: "",
     systemLabel: "",
     sampleRateHz: 48000,
-    channels: 2,
+    channels: 1,
     bitrateKbps: 160,
     segmentDurationSeconds: 20,
     captureProfile: "balanced",
@@ -151,7 +158,11 @@ function normalizeCaptureSettings(raw: unknown): CaptureSettings {
   const input = (raw ?? {}) as Partial<CaptureSettings>;
   const backend = input.backend;
   const profile = input.captureProfile;
+  const captureEngine = inferCaptureEngine(input);
+  const systemAudioMode = inferSystemAudioMode(input);
   return {
+    captureEngine,
+    systemAudioMode,
     ffmpegPath: asString(input.ffmpegPath),
     backend:
       backend === "avfoundation" || backend === "dshow" || backend === "pulse" || backend === "alsa" || backend === "auto"
@@ -174,6 +185,30 @@ function normalizeCaptureSettings(raw: unknown): CaptureSettings {
     noiseSuppression: asBoolean(input.noiseSuppression, DEFAULT_SETTINGS_V2.capture.noiseSuppression),
     limiter: asBoolean(input.limiter, DEFAULT_SETTINGS_V2.capture.limiter),
   };
+}
+
+function inferCaptureEngine(input: Partial<CaptureSettings>): CaptureEngine {
+  if (input.captureEngine === "web" || input.captureEngine === "ffmpeg") {
+    return input.captureEngine;
+  }
+
+  return DEFAULT_SETTINGS_V2.capture.captureEngine;
+}
+
+function inferSystemAudioMode(input: Partial<CaptureSettings>): SystemAudioMode {
+  if (input.systemAudioMode === "off" || input.systemAudioMode === "loopback") {
+    return input.systemAudioMode;
+  }
+
+  if (input.systemAudioMode === "share") {
+    return "off";
+  }
+
+  if (asString(input.systemDevice).trim() || asString(input.systemLabel).trim()) {
+    return "loopback";
+  }
+
+  return DEFAULT_SETTINGS_V2.capture.systemAudioMode;
 }
 
 function normalizeTranscriptionSettings(raw: unknown): TranscriptionSettings {
@@ -295,7 +330,7 @@ export function isLikelyTestWhisperModelPath(modelPath: string): boolean {
 
 export function isCoreConfigured(settings: PluginSettingsV2): boolean {
   const selectedModel = getSelectedSummaryModel(settings.summary);
-  if (!settings.capture.ffmpegPath.trim()) return false;
+  if (settings.capture.systemAudioMode === "loopback" && !settings.capture.systemDevice.trim()) return false;
   if (!settings.transcription.whisperCliPath.trim()) return false;
   if (!settings.transcription.modelPath.trim()) return false;
   if (isLikelyTestWhisperModelPath(settings.transcription.modelPath)) return false;
@@ -303,4 +338,19 @@ export function isCoreConfigured(settings: PluginSettingsV2): boolean {
     return !!settings.summary.ollamaEndpoint.trim() && !!selectedModel.trim();
   }
   return !!selectedModel.trim() && !!getSelectedProviderApiKey(settings.summary).trim();
+}
+
+export function isSystemAudioEnabled(capture: CaptureSettings): boolean {
+  return capture.systemAudioMode !== "off";
+}
+
+export function isLoopbackSystemAudioEnabled(capture: CaptureSettings): boolean {
+  return capture.systemAudioMode === "loopback";
+}
+
+export function resolveCaptureRuntime(capture: CaptureSettings): CaptureRuntimeKind {
+  if (capture.systemAudioMode === "loopback") {
+    return "web-multi-input";
+  }
+  return "web-mic";
 }

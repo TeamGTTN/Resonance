@@ -3,20 +3,22 @@ import { buildDashboardSnapshot, deriveSessionListItem } from "../application/da
 import type { SessionController } from "../application/SessionController";
 import type { DashboardSnapshot } from "../domain/dashboard";
 import type { SessionListItem } from "../domain/session";
-import { isCoreConfigured, resolveCaptureBackend, type PluginSettingsV2 } from "../domain/settings";
-import { CAPTURE_PROFILE_LABELS, getCaptureProfileDescription, resolveAudioFilterChain } from "../domain/captureProfiles";
+import { isCoreConfigured, type PluginSettingsV2 } from "../domain/settings";
 import { VaultAdapter } from "../infrastructure/adapters/VaultAdapter";
 import { requireNodeModule } from "../infrastructure/node";
 import {
-  autoDetectFfmpeg,
   autoDetectWhisperCli,
   autoDetectWhisperModel,
   autoDetectWhisperRepo,
   inferWhisperRepoPath,
 } from "../infrastructure/system/autoDetect";
 import { getPluginInstance } from "../infrastructure/obsidianDesktop";
-import { scanDevices } from "../infrastructure/system/deviceScanner";
 import { SessionStore } from "../infrastructure/storage/SessionStore";
+import {
+  listWebAudioInputDevices,
+  type WebAudioDeviceSnapshot,
+  type WebAudioPermissionState,
+} from "../infrastructure/system/webAudio";
 import { formatBytes, formatDuration } from "../utils/format";
 import { uiCopy } from "./copy";
 import { TextPreviewModal } from "./modals/TextPreviewModal";
@@ -74,7 +76,7 @@ const SETUP_TABS: SettingsTabDefinition[] = [
   {
     key: "capture",
     label: "Capture",
-    subtitle: "FFmpeg, devices, quick test.",
+    subtitle: "Microphone and additional audio sources.",
   },
   {
     key: "transcription",
@@ -173,7 +175,28 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
 
   private renderHero(container: HTMLElement) {
     const hero = container.createEl("div", { cls: "rxn-card rxn-hero" });
-    hero.createEl("h2", { text: uiCopy.appName, cls: "rxn-hero-brand" });
+
+    const headerRow = hero.createEl("div");
+    headerRow.style.display = "flex";
+    headerRow.style.justifyContent = "space-between";
+    headerRow.style.alignItems = "center";
+
+    headerRow.createEl("h2", { text: uiCopy.appName, cls: "rxn-hero-brand" });
+
+    const sponsor = headerRow.createEl("a", {
+      href: "https://buymeacoffee.com/michaelgorini",
+    });
+    sponsor.target = "_blank";
+    sponsor.style.display = "flex";
+    sponsor.style.alignItems = "center";
+    sponsor.style.gap = "6px";
+    sponsor.style.fontSize = "13px";
+    sponsor.style.color = "var(--text-muted)";
+    sponsor.style.textDecoration = "none";
+
+    sponsor.createEl("span", { text: "Support Resonance" });
+    sponsor.createEl("span", { text: "🤍" });
+
     hero.createEl("p", {
       text: uiCopy.settings.title,
       cls: "rxn-muted rxn-hero-subtitle",
@@ -266,9 +289,8 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     meta.createEl("span", { text: `${snapshot.health.blockingCount} blocking`, cls: "rxn-pill" });
     meta.createEl("span", { text: `${snapshot.health.warningCount} warnings`, cls: "rxn-pill" });
     meta.createEl("span", {
-      text: `Quick test: ${
-        this.isQuickTestRunning ? "running" : this.smokeMessage ? (this.smokeMessage.includes("failed") ? "failed" : "passed") : "not run"
-      }`,
+      text: `Quick test: ${this.isQuickTestRunning ? "running" : this.smokeMessage ? (this.smokeMessage.includes("failed") ? "failed" : "passed") : "not run"
+        }`,
       cls: "rxn-pill",
     });
     meta.createEl("span", { text: `Backend: ${snapshot.health.report?.backend ?? "n/a"}`, cls: "rxn-pill" });
@@ -344,185 +366,109 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
   }
 
   private async renderCaptureTab(container: HTMLElement) {
-    const settings = this.options.getSettings();
-    const ffmpeg = this.createGuideSection(container, {
-      badge: "Recorder",
-      title: "FFmpeg",
-      intro: "FFmpeg is required for recording.",
-      platformGuides: {
-        macos: {
-          text: "Install FFmpeg, then paste the path to ffmpeg below.",
-          code: "brew install ffmpeg",
+    let settings = this.options.getSettings();
+    if (settings.capture.captureEngine !== "web" || settings.capture.systemAudioMode === "share") {
+      await this.options.saveSettings((current) => ({
+        ...current,
+        capture: {
+          ...current.capture,
+          captureEngine: "web",
+          systemAudioMode: current.capture.systemAudioMode === "share" ? "off" : current.capture.systemAudioMode,
         },
-        linux: {
-          text: "Install FFmpeg with your package manager, then paste the path below.",
-          code: "sudo apt install ffmpeg",
-        },
-        windows: {
-          text: "Install FFmpeg, then paste the full path to ffmpeg.exe below.",
-          code: "winget install Gyan.FFmpeg",
-        },
-      },
-    });
+      }));
+      settings = this.options.getSettings();
+    }
 
-    new Setting(ffmpeg)
-      .setName("FFmpeg path")
-      .setDesc("Path to the FFmpeg executable.")
-      .addText((text) =>
-        text.setPlaceholder("/opt/homebrew/bin/ffmpeg").setValue(settings.capture.ffmpegPath).onChange(async (value) => {
-          await this.options.saveSettings((current) => ({
-            ...current,
-            capture: { ...current.capture, ffmpegPath: value.trim() },
-          }));
-        })
-      )
-      .addButton((button) =>
-        button.setButtonText(uiCopy.actions.detectFfmpeg).onClick(async () => {
-          const detected = await autoDetectFfmpeg();
-          if (!detected) {
-            new Notice(uiCopy.notices.ffmpegNotDetected);
-            return;
-          }
-          await this.options.saveSettings((current) => ({
-            ...current,
-            capture: { ...current.capture, ffmpegPath: detected },
-          }));
-          new Notice(uiCopy.notices.ffmpegDetected);
-          await this.display();
-        })
-      );
+    await this.renderWebCaptureTab(container, settings);
+  }
+
+  private async renderWebCaptureTab(container: HTMLElement, settings: PluginSettingsV2) {
+    const deviceSnapshot = await listWebAudioInputDevices().catch<WebAudioDeviceSnapshot>(() => ({
+      devices: [],
+      permissionState: "unknown",
+      labelsAvailable: false,
+    }));
+    const additionalSourceEnabled =
+      settings.capture.systemAudioMode === "loopback" && Boolean(settings.capture.systemDevice.trim());
 
     const capture = this.createGuideSection(container, {
       badge: "Devices",
-      title: "Inputs",
-      intro: "Pick a microphone. Add system audio only if you really need it.",
-      platformGuides: {
-        macos: {
-          bullets: ["For system audio, install a loopback device such as BlackHole and select it below."],
-        },
-        linux: {
-          bullets: ["For system audio, use a PulseAudio or PipeWire monitor source if available."],
-        },
-        windows: {
-          bullets: ["For system audio, use a loopback device such as VB-Cable and select it below."],
-        },
-      },
+      title: "Audio sources",
+      intro: "Resonance now records through one Web Audio graph. Choose the microphone first, then optionally add a second input such as BlackHole, VB-Cable, or a monitor source.",
     });
 
-    new Setting(capture)
-      .setName("Backend")
-      .setDesc("Use Automatic unless device scan fails.")
-      .addDropdown((dropdown) => {
-        dropdown.addOption("auto", "Automatic");
-        dropdown.addOption("avfoundation", "avfoundation (macOS)");
-        dropdown.addOption("dshow", "dshow (Windows)");
-        dropdown.addOption("pulse", "pulse (Linux)");
-        dropdown.addOption("alsa", "alsa (Linux)");
-        dropdown.setValue(settings.capture.backend);
-        dropdown.onChange(async (value) => {
-          await this.options.saveSettings((current) => ({
-            ...current,
-            capture: { ...current.capture, backend: value as PluginSettingsV2["capture"]["backend"] },
-          }));
-        });
+    const meta = capture.createDiv({ cls: "rxn-pill-row rxn-diagnostics-meta" });
+    meta.createEl("span", {
+      text: `Permission: ${this.getWebPermissionLabel(deviceSnapshot.permissionState)}`,
+      cls: `rxn-status-pill is-${this.getWebPermissionTone(deviceSnapshot.permissionState)}`,
+    });
+    meta.createEl("span", {
+      text: deviceSnapshot.devices.length > 0 ? `${deviceSnapshot.devices.length} mic inputs` : "No mic inputs found",
+      cls: "rxn-pill",
+    });
+    if (!deviceSnapshot.labelsAvailable) {
+      meta.createEl("span", {
+        text: "Labels improve after granting mic permission",
+        cls: "rxn-pill",
       });
+    }
 
     const micSetting = new Setting(capture)
       .setName("Microphone device")
-      .setDesc("Pick the microphone to record.");
+      .setDesc(
+        deviceSnapshot.labelsAvailable
+          ? "Pick the main voice input or stay on the system default input."
+          : "Use the system default input or grant permission once to reveal clearer device labels."
+      );
     const micSelect = micSetting.controlEl.createEl("select");
     micSelect.addClass("rxn-inline-select");
-
-    const systemSetting = new Setting(capture)
-      .setName("System audio device")
-      .setDesc("Optional loopback or monitor input.");
-    const systemSelect = systemSetting.controlEl.createEl("select");
-    systemSelect.addClass("rxn-inline-select");
-
-    const captureActions = capture.createDiv({ cls: "rxn-action-bar" });
-    this.createActionButton(captureActions, uiCopy.actions.refreshDevices, async () => {
-      await this.populateDevices(micSelect, systemSelect, true);
-    }, "rxn-btn-secondary");
-    this.createActionButton(
-      captureActions,
-      this.isQuickTestRunning ? "Running quick test..." : uiCopy.actions.runQuickTest,
-      async () => {
-        await this.runQuickTest();
-        await this.switchTab("control-room");
-      },
-      "rxn-btn-secondary",
-      this.isQuickTestRunning
-    );
-
-    const captureMeta = capture.createDiv({ cls: "rxn-pill-row rxn-diagnostics-meta" });
-    captureMeta.createEl("span", {
-      text: `Backend: ${resolveCaptureBackend(settings.capture.backend)}`,
-      cls: "rxn-pill",
+    this.populateWebAudioInputs(micSelect, deviceSnapshot, settings.capture.microphoneDevice, {
+      defaultLabel: "System default input",
     });
-
-    await this.populateDevices(micSelect, systemSelect);
     micSelect.addEventListener("change", async () => {
       const selected = micSelect.options[micSelect.selectedIndex];
-      if (!selected?.value) return;
       await this.options.saveSettings((current) => ({
         ...current,
         capture: {
           ...current.capture,
-          microphoneDevice: selected.value,
-          microphoneLabel: selected.text,
+          captureEngine: "web",
+          microphoneDevice: selected?.value === "default" ? "" : selected?.value ?? "",
+          microphoneLabel: selected?.text ?? "",
         },
       }));
+    });
+
+    const systemSetting = new Setting(capture)
+      .setName("Additional source")
+      .setDesc(
+        deviceSnapshot.labelsAvailable
+          ? "Optional second input. Select a loopback device here if you want Teams, Meet, browser tabs, or desktop audio in the same recording."
+          : "Optional second input. Grant permission once to reveal clearer device labels for loopback devices too."
+      );
+    const systemSelect = systemSetting.controlEl.createEl("select");
+    systemSelect.addClass("rxn-inline-select");
+    this.populateWebAudioInputs(systemSelect, deviceSnapshot, additionalSourceEnabled ? settings.capture.systemDevice : "", {
+      includeOff: true,
+      offLabel: "Off (microphone only)",
     });
     systemSelect.addEventListener("change", async () => {
       const selected = systemSelect.options[systemSelect.selectedIndex];
+      const enabled = Boolean(selected?.value);
       await this.options.saveSettings((current) => ({
         ...current,
         capture: {
           ...current.capture,
-          systemDevice: selected?.value ?? "",
-          systemLabel: selected?.value ? selected.text : "",
+          captureEngine: "web",
+          systemAudioMode: enabled ? "loopback" : "off",
+          systemDevice: enabled ? selected.value : "",
+          systemLabel: enabled ? selected.text : "",
         },
       }));
     });
 
     new Setting(capture)
-      .setName("Sample rate")
-      .setDesc("Usually 48000.")
-      .addText((text) =>
-        text.setValue(String(settings.capture.sampleRateHz)).onChange(async (value) => {
-          await this.options.saveSettings((current) => ({
-            ...current,
-            capture: { ...current.capture, sampleRateHz: Math.max(8_000, Math.min(192_000, Number(value) || 48_000)) },
-          }));
-        })
-      );
-
-    new Setting(capture)
-      .setName("Channels")
-      .setDesc("Mono is lighter. Stereo keeps more room context.")
-      .addDropdown((dropdown) => {
-        dropdown.addOption("1", "Mono");
-        dropdown.addOption("2", "Stereo");
-        dropdown.setValue(String(settings.capture.channels));
-        dropdown.onChange(async (value) => {
-          await this.options.saveSettings((current) => ({
-            ...current,
-            capture: { ...current.capture, channels: value === "1" ? 1 : 2 },
-          }));
-        });
-      });
-
-    new Setting(capture)
-      .setName("Bitrate / segment seconds")
-      .setDesc("MP3 quality and live chunk length.")
-      .addText((text) =>
-        text.setPlaceholder("160").setValue(String(settings.capture.bitrateKbps)).onChange(async (value) => {
-          await this.options.saveSettings((current) => ({
-            ...current,
-            capture: { ...current.capture, bitrateKbps: Math.max(64, Math.min(320, Number(value) || 160)) },
-          }));
-        })
-      )
+      .setName("Segment seconds")
+      .setDesc("How often live transcript chunks are committed.")
       .addText((text) =>
         text.setPlaceholder("20").setValue(String(settings.capture.segmentDurationSeconds)).onChange(async (value) => {
           await this.options.saveSettings((current) => ({
@@ -532,118 +478,10 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
         })
       );
 
-    // ── Audio processing ───────────────────────────────────────────────────
-    const audioSection = this.createGuideSection(container, {
-      badge: "Audio",
-      title: uiCopy.capture.profileSection,
-      intro: uiCopy.capture.profileIntro,
-    });
-
-    // Troubleshooting callout
-    const tsBox = audioSection.createDiv({ cls: "rxn-inline-note is-info" });
-    tsBox.createEl("strong", { text: uiCopy.capture.troubleshooting.title });
-    const tsList = tsBox.createEl("ul", { cls: "rxn-guide-list" });
-    tsList.createEl("li", { text: uiCopy.capture.troubleshooting.robotic });
-    tsList.createEl("li", { text: uiCopy.capture.troubleshooting.inaccurate });
-    tsList.createEl("li", { text: uiCopy.capture.troubleshooting.noisy });
-
-    // Profile dropdown
-    const profileDesc = getCaptureProfileDescription(settings.capture.captureProfile);
-    new Setting(audioSection)
-      .setName(uiCopy.capture.profileLabel)
-      .setDesc(profileDesc)
-      .addDropdown((dropdown) => {
-        for (const [value, label] of Object.entries(CAPTURE_PROFILE_LABELS)) {
-          dropdown.addOption(value, label);
-        }
-        dropdown.setValue(settings.capture.captureProfile);
-        dropdown.onChange(async (value) => {
-          await this.options.saveSettings((current) => ({
-            ...current,
-            capture: { ...current.capture, captureProfile: value as PluginSettingsV2["capture"]["captureProfile"] },
-          }));
-          await this.display();
-        });
-      });
-
-    // Custom profile controls (only shown when profile = custom)
-    if (settings.capture.captureProfile === "custom") {
-      const customSection = this.createGuideSection(container, {
-        badge: "Custom",
-        title: uiCopy.capture.customSection,
-        intro: uiCopy.capture.customIntro,
-      });
-
-      new Setting(customSection)
-        .setName(uiCopy.capture.micGainLabel)
-        .setDesc(uiCopy.capture.micGainDesc)
-        .addText((text) =>
-          text
-            .setPlaceholder("0")
-            .setValue(String(settings.capture.micGainDb))
-            .onChange(async (value) => {
-              const parsed = parseFloat(value);
-              if (!Number.isFinite(parsed)) return;
-              await this.options.saveSettings((current) => ({
-                ...current,
-                capture: { ...current.capture, micGainDb: Math.max(-12, Math.min(12, parsed)) },
-              }));
-            })
-        );
-
-      new Setting(customSection)
-        .setName(uiCopy.capture.systemGainLabel)
-        .setDesc(uiCopy.capture.systemGainDesc)
-        .addText((text) =>
-          text
-            .setPlaceholder("0")
-            .setValue(String(settings.capture.systemGainDb))
-            .onChange(async (value) => {
-              const parsed = parseFloat(value);
-              if (!Number.isFinite(parsed)) return;
-              await this.options.saveSettings((current) => ({
-                ...current,
-                capture: { ...current.capture, systemGainDb: Math.max(-12, Math.min(12, parsed)) },
-              }));
-            })
-        );
-
-      new Setting(customSection)
-        .setName(uiCopy.capture.noiseSuppressionLabel)
-        .setDesc(uiCopy.capture.noiseSuppressionDesc)
-        .addToggle((toggle) =>
-          toggle.setValue(settings.capture.noiseSuppression).onChange(async (value) => {
-            await this.options.saveSettings((current) => ({
-              ...current,
-              capture: { ...current.capture, noiseSuppression: value },
-            }));
-          })
-        );
-
-      new Setting(customSection)
-        .setName(uiCopy.capture.limiterLabel)
-        .setDesc(uiCopy.capture.limiterDesc)
-        .addToggle((toggle) =>
-          toggle.setValue(settings.capture.limiter).onChange(async (value) => {
-            await this.options.saveSettings((current) => ({
-              ...current,
-              capture: { ...current.capture, limiter: value },
-            }));
-          })
-        );
-    }
-
-    // Filter preview — always visible
-    const hasDual = Boolean(settings.capture.systemDevice || settings.capture.systemLabel);
-    const { filterPreview } = resolveAudioFilterChain(settings.capture, hasDual);
-    const previewSetting = new Setting(audioSection)
-      .setName(uiCopy.capture.filterPreviewLabel)
-      .setDesc(uiCopy.capture.filterPreviewDesc);
-    const previewEl = previewSetting.controlEl.createEl("code", {
-      text: filterPreview,
-      cls: "rxn-filter-preview",
-    });
-    previewEl.setAttribute("title", filterPreview);
+    const captureActions = capture.createDiv({ cls: "rxn-action-bar" });
+    this.createActionButton(captureActions, uiCopy.actions.refreshDevices, async () => {
+      await this.display();
+    }, "rxn-btn-secondary");
   }
 
   private async renderTranscriptionTab(container: HTMLElement) {
@@ -1109,6 +947,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       });
 
       const meta = card.createDiv({ cls: "rxn-session-meta-row" });
+      this.renderSessionMeta(meta, "Source", item.sourceLabel);
       this.renderSessionMeta(meta, "Started", new Date(item.createdAt).toLocaleString());
       this.renderSessionMeta(meta, "Duration", formatDuration(item.elapsedSeconds));
       this.renderSessionMeta(meta, "Segments", String(item.committedSegments));
@@ -1281,7 +1120,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       const electron = requireNodeModule<{ shell?: { showItemInFolder?: (path: string) => void } }>("electron");
       const sessionsRoot = this.store.getSessionsRootDir();
       electron.shell?.showItemInFolder?.(sessionsRoot);
-    } catch {}
+    } catch { }
   }
 
   private createGuideSection(container: HTMLElement, options: GuideSectionOptions): HTMLElement {
@@ -1494,7 +1333,11 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     try {
       new Notice("Quick test started...");
       const result = await this.options.controller.runSmokeTest();
-      this.smokeMessage = result.ok ? uiCopy.diagnostics.smokePassed : `${uiCopy.notices.quickTestFailedPrefix}: ${result.detail}`;
+      this.smokeMessage = result.ok
+        ? uiCopy.diagnostics.smokePassed
+        : result.cancelled
+          ? result.detail
+          : `${uiCopy.notices.quickTestFailedPrefix}: ${result.detail}`;
       new Notice(this.smokeMessage);
       await this.refreshControlRoomData(false);
     } finally {
@@ -1509,19 +1352,21 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     const fs = requireNodeModule<{ readFileSync: (path: string) => Buffer }>("fs");
     const buffer = fs.readFileSync(path);
     const bytes = Uint8Array.from(buffer);
-    const url = URL.createObjectURL(new Blob([bytes], { type: "audio/mpeg" }));
+    const url = URL.createObjectURL(new Blob([bytes], { type: this.getAudioMimeType(path) }));
     this.audioUrlCache.set(path, url);
     return url;
   }
 
   private exportAudio(item: SessionListItem) {
+    const pathModule = requireNodeModule<{ extname: (path: string) => string }>("path");
     const fs = requireNodeModule<{ readFileSync: (path: string) => Buffer }>("fs");
     const bytes = Uint8Array.from(fs.readFileSync(item.paths.fullAudioPath));
-    const blob = new Blob([bytes], { type: "audio/mpeg" });
+    const extension = pathModule.extname(item.paths.fullAudioPath) || ".mp3";
+    const blob = new Blob([bytes], { type: this.getAudioMimeType(item.paths.fullAudioPath) });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `${item.scenarioLabel}-${item.sessionId}.mp3`;
+    anchor.download = `${item.scenarioLabel}-${item.sessionId}${extension}`;
     anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
   }
@@ -1542,68 +1387,80 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     return button;
   }
 
-  private resetDeviceSelects(micSelect: HTMLSelectElement, systemSelect: HTMLSelectElement, placeholder: string) {
-    micSelect.empty();
-    const micPlaceholder = document.createElement("option");
-    micPlaceholder.value = "";
-    micPlaceholder.text = placeholder;
-    micSelect.appendChild(micPlaceholder);
+  private populateWebAudioInputs(
+    select: HTMLSelectElement,
+    snapshot: WebAudioDeviceSnapshot,
+    selectedDeviceId: string,
+    options: {
+      includeOff?: boolean;
+      offLabel?: string;
+      defaultLabel?: string;
+    } = {}
+  ) {
+    select.empty();
 
-    systemSelect.empty();
-    const none = document.createElement("option");
-    none.value = "";
-    none.text = "(none)";
-    systemSelect.appendChild(none);
+    const seen = new Set<string>();
+    const addOption = (value: string, label: string) => {
+      if (seen.has(value)) return;
+      seen.add(value);
+      const option = document.createElement("option");
+      option.value = value;
+      option.text = label;
+      select.appendChild(option);
+    };
+
+    if (options.includeOff) {
+      addOption("", options.offLabel ?? "Off");
+    }
+
+    addOption("default", options.defaultLabel ?? "System default input");
+    for (const device of snapshot.devices) {
+      addOption(device.deviceId, device.label);
+    }
+
+    if (selectedDeviceId && seen.has(selectedDeviceId)) {
+      select.value = selectedDeviceId;
+    } else if (!selectedDeviceId && options.includeOff) {
+      select.value = "";
+    } else {
+      select.value = "default";
+    }
   }
 
-  private async populateDevices(micSelect: HTMLSelectElement, systemSelect: HTMLSelectElement, notifyOnFailure = false) {
-    const settings = this.options.getSettings();
-    this.resetDeviceSelects(
-      micSelect,
-      systemSelect,
-      settings.capture.ffmpegPath.trim() ? "Refresh devices to load microphones" : "Set FFmpeg path first"
-    );
-    if (!settings.capture.ffmpegPath.trim()) return;
-
-    try {
-      const scanned = await scanDevices(settings.capture.ffmpegPath, resolveCaptureBackend(settings.capture.backend));
-      const audioDevices = scanned.filter((device) => device.type === "audio");
-      if (audioDevices.length === 0) {
-        return;
-      }
-
-      micSelect.empty();
-      for (const device of audioDevices) {
-        const option = document.createElement("option");
-        option.value = device.name;
-        option.text = device.label;
-        micSelect.appendChild(option);
-
-        const sysOption = document.createElement("option");
-        sysOption.value = device.name;
-        sysOption.text = device.label;
-        systemSelect.appendChild(sysOption);
-      }
-
-      if (
-        settings.capture.microphoneDevice &&
-        Array.from(micSelect.options).some((option) => option.value === settings.capture.microphoneDevice)
-      ) {
-        micSelect.value = settings.capture.microphoneDevice;
-      } else if (micSelect.options.length > 0) {
-        micSelect.selectedIndex = 0;
-      }
-
-      if (
-        settings.capture.systemDevice &&
-        Array.from(systemSelect.options).some((option) => option.value === settings.capture.systemDevice)
-      ) {
-        systemSelect.value = settings.capture.systemDevice;
-      }
-    } catch (error) {
-      if (notifyOnFailure) {
-        new Notice(`Device scan failed: ${String((error as Error)?.message ?? error)}`);
-      }
+  private getWebPermissionLabel(permission: WebAudioPermissionState): string {
+    switch (permission) {
+      case "granted":
+        return "Granted";
+      case "denied":
+        return "Denied";
+      case "prompt":
+        return "Not requested";
+      case "unsupported":
+        return "Unsupported";
+      case "unknown":
+      default:
+        return "Unknown";
     }
+  }
+
+  private getWebPermissionTone(permission: WebAudioPermissionState): "healthy" | "warning" | "failed" {
+    switch (permission) {
+      case "granted":
+        return "healthy";
+      case "denied":
+      case "unsupported":
+        return "failed";
+      case "prompt":
+      case "unknown":
+      default:
+        return "warning";
+    }
+  }
+
+  private getAudioMimeType(path: string): string {
+    const pathModule = requireNodeModule<{ extname: (path: string) => string }>("path");
+    const extension = pathModule.extname(path).toLowerCase();
+    if (extension === ".wav") return "audio/wav";
+    return "audio/mpeg";
   }
 }

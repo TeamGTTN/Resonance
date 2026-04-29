@@ -1,18 +1,16 @@
 import type { App } from "obsidian";
 import { getScenario } from "../domain/scenarios";
 import { buildDiagnosticsSummary, type RecordingSessionManifest, type SessionListItem, type SessionRuntimeSnapshot, type SessionState } from "../domain/session";
-import { type PluginSettingsV2 } from "../domain/settings";
+import { resolveCaptureRuntime, type PluginSettingsV2 } from "../domain/settings";
 import { OrderedSegmentQueue, type SegmentDescriptor } from "./OrderedSegmentQueue";
 import { deriveSessionListItem } from "./dashboard";
-import { collectSegmentDescriptors } from "./segmentFiles";
-import { AudioCaptureAdapter } from "../infrastructure/adapters/AudioCaptureAdapter";
+import { WebCaptureAdapter } from "../infrastructure/adapters/WebCaptureAdapter";
 import { WhisperTranscriptionAdapter } from "../infrastructure/adapters/TranscriptionAdapter";
 import { SummaryAdapter } from "../infrastructure/adapters/SummaryAdapter";
 import { SessionStore } from "../infrastructure/storage/SessionStore";
 import { VaultAdapter } from "../infrastructure/adapters/VaultAdapter";
 import { DiagnosticsService } from "../infrastructure/system/DiagnosticsService";
 import { formatTranscriptChunkMarkdown, normalizeCheckboxes, sanitizeSummary } from "../utils/markdown";
-import { requireNodeModule } from "../infrastructure/node";
 
 interface SessionControllerOptions {
   app: App;
@@ -23,13 +21,18 @@ interface SessionControllerOptions {
 
 const STARTABLE_STATES = new Set<SessionState>(["idle", "done", "failed"]);
 
+interface ActiveCaptureRuntime {
+  stop(): Promise<void>;
+  isRunning(): boolean;
+}
+
 export class SessionController {
   private readonly store: SessionStore;
   private readonly vaultAdapter: VaultAdapter;
   private readonly diagnosticsService: DiagnosticsService;
   private readonly summaryAdapter = new SummaryAdapter();
 
-  private captureAdapter: AudioCaptureAdapter | null = null;
+  private captureAdapter: ActiveCaptureRuntime | null = null;
   private queue: OrderedSegmentQueue | null = null;
   private manifest: RecordingSessionManifest | null = null;
   private segmentPollerId: number | null = null;
@@ -163,6 +166,7 @@ export class SessionController {
     this.resetSnapshot();
     const settings = this.options.getSettings();
     const scenario = getScenario(scenarioKey);
+    const captureRuntime = resolveCaptureRuntime(settings.capture);
     this.stopRequested = false;
 
     try {
@@ -181,20 +185,35 @@ export class SessionController {
       this.manifest.notes.liveTranscriptNotePath = workspace.liveTranscriptNotePath;
       await this.store.writeManifest(this.manifest);
 
-      this.captureAdapter = new AudioCaptureAdapter();
       const transcriptionAdapter = new WhisperTranscriptionAdapter(settings.transcription, settings.capture.ffmpegPath);
       this.queue = new OrderedSegmentQueue(async (segment) => {
         await this.commitSegment(segment, transcriptionAdapter);
       }, Math.max(0, this.manifest.live.lastCommittedSegment + 1));
 
-      await this.captureAdapter.start({
-        settings: settings.capture,
+      const adapter = new WebCaptureAdapter();
+      this.captureAdapter = adapter;
+      await adapter.start({
         fullAudioPath: this.manifest.paths.fullAudioPath,
         segmentsDir: this.manifest.paths.segmentsDir,
+        segmentDurationSeconds: settings.capture.segmentDurationSeconds,
+        microphoneDevice: settings.capture.microphoneDevice,
+        additionalSources:
+          captureRuntime === "web-multi-input" && settings.capture.systemDevice.trim()
+            ? [
+                {
+                  deviceId: settings.capture.systemDevice.trim(),
+                  label: settings.capture.systemLabel.trim() || "Additional source",
+                },
+              ]
+            : [],
+        onSegmentReady: (segment) => {
+          this.queue?.enqueue([segment]);
+          this.refreshQueueSnapshot();
+        },
         onLog: (line) => {
           if (this.manifest) void this.store.appendDiagnostics(this.manifest, line);
         },
-        onUnexpectedExit: (message) => {
+        onError: (message) => {
           void this.failSession(message);
         },
       });
@@ -212,7 +231,6 @@ export class SessionController {
       this.manifest.runtime.startedAt = new Date(this.startedAtMs).toISOString();
       await this.store.writeManifest(this.manifest);
       this.startElapsedTimer();
-      this.startSegmentPolling();
       this.transition("segmenting", "Recorder primed. Waiting for the first segment...");
     } catch (error) {
       const message = String((error as Error)?.message ?? error);
@@ -256,7 +274,6 @@ export class SessionController {
   private async finishStoppedSession(): Promise<void> {
     const manifest = this.requireManifest();
     try {
-      await this.enqueueStableSegments(true);
       await this.queue?.whenIdle();
       this.refreshQueueSnapshot();
       await this.store.appendDiagnostics(manifest, "Capture stopped and all live segments committed.");
@@ -354,41 +371,11 @@ export class SessionController {
     }
   }
 
-  private startSegmentPolling() {
-    this.stopSegmentPolling();
-    this.segmentPollerId = window.setInterval(() => {
-      void this.enqueueStableSegments(false);
-    }, 900);
-  }
-
   private stopSegmentPolling() {
     if (this.segmentPollerId !== null) {
       window.clearInterval(this.segmentPollerId);
       this.segmentPollerId = null;
     }
-  }
-
-  private async enqueueStableSegments(allowUnstable: boolean) {
-    const manifest = this.requireManifest();
-    const fs = requireNodeModule<{
-      readdirSync: (path: string) => string[];
-      statSync: (path: string) => { mtimeMs: number; isFile(): boolean };
-    }>("fs");
-    const path = requireNodeModule<{ join: (...parts: string[]) => string }>("path");
-    const now = Date.now();
-    const entries = fs.readdirSync(manifest.paths.segmentsDir).map((entry) => {
-      const fullPath = path.join(manifest.paths.segmentsDir, entry);
-      const stat = fs.statSync(fullPath);
-      return {
-        name: entry,
-        path: fullPath,
-        mtimeMs: stat.mtimeMs,
-        isFile: stat.isFile(),
-      };
-    });
-    const segments = collectSegmentDescriptors(entries, now, allowUnstable);
-    this.queue?.enqueue(segments);
-    this.refreshQueueSnapshot();
   }
 
   private refreshQueueSnapshot() {

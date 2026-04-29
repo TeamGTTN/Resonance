@@ -95,11 +95,38 @@ export class WhisperTranscriptionAdapter {
       "whisper.cpp"
     );
 
+    let rawTranscript = "";
     if (fs.existsSync(outputTextPath)) {
-      return fs.readFileSync(outputTextPath, { encoding: "utf8" }).trim();
+      rawTranscript = fs.readFileSync(outputTextPath, { encoding: "utf8" }).trim();
+    } else {
+      rawTranscript = result.stdout.trim();
     }
 
-    return result.stdout.trim();
+    return this.cleanTranscript(rawTranscript);
+  }
+
+  private cleanTranscript(text: string): string {
+    let cleaned = text
+      // Rimuove tag di speaker o suoni ambientali [Suono], [Speaker 1], [PROFESSORI]
+      .replace(/\[.*?\]/g, "")
+      // Rimuove caratteri ripetuti in modo anomalo
+      .replace(/[-_]{2,}/g, " ")
+      .replace(/\.{4,}/g, "...")
+      // Rimuove alcune allucinazioni note (in italiano e inglese)
+      .replace(/(Sottotitoli|Subtitles) (creati|a cura|di).*$/gim, "")
+      .replace(/Traduzione di.*$/gim, "")
+      .replace(/Iscriviti.*$/gim, "")
+      .replace(/Amara\.org/gim, "")
+      // Normalizza gli spazi
+      .replace(/\s+/g, " ")
+      .trim();
+      
+    // Se la stringa pulita contiene solo punteggiatura o spazi, la consideriamo vuota
+    if (/^[.,!?\-;: ]*$/.test(cleaned)) {
+      return "";
+    }
+    
+    return cleaned;
   }
 
   private buildWhisperArgs(inputAudioPath: string, outputPrefix: string, relaxed: boolean): string[] {

@@ -1,6 +1,7 @@
 import type { DashboardSnapshot, DiagnosticsGroups } from "../domain/dashboard";
 import type { DiagnosticsReport } from "../domain/diagnostics";
 import type { SessionListItem, SessionRuntimeSnapshot, RecordingSessionManifest, SessionHealthBadge } from "../domain/session";
+import type { SystemAudioMode } from "../domain/settings";
 import { uiCopy } from "../ui/copy";
 
 export function groupDiagnosticsChecks(report?: DiagnosticsReport): DiagnosticsGroups {
@@ -23,10 +24,15 @@ export function deriveSessionHealthBadge(manifest: RecordingSessionManifest): Se
 }
 
 export function deriveSessionListItem(manifest: RecordingSessionManifest, audioSizeBytes: number): SessionListItem {
+  const captureEngine = manifest.captureEngine ?? "ffmpeg";
+  const systemAudioMode = manifest.systemAudioMode ?? inferSystemAudioMode(manifest);
   return {
     sessionId: manifest.sessionId,
     scenarioKey: manifest.scenarioKey,
     scenarioLabel: manifest.scenarioLabel,
+    captureEngine,
+    systemAudioMode,
+    sourceLabel: describeSessionSource(systemAudioMode),
     createdAt: manifest.createdAt,
     updatedAt: manifest.updatedAt,
     lastActivityAt: manifest.runtime.lastActivityAt,
@@ -54,6 +60,22 @@ export function deriveSessionListItem(manifest: RecordingSessionManifest, audioS
       liveTranscriptNotePath: manifest.notes.liveTranscriptNotePath,
     },
   };
+}
+
+function describeSessionSource(systemAudioMode: SystemAudioMode): string {
+  if (systemAudioMode === "share") {
+    return "Shared system audio";
+  }
+  if (systemAudioMode === "loopback") {
+    return "Microphone + additional source";
+  }
+  return "Microphone";
+}
+
+function inferSystemAudioMode(manifest: RecordingSessionManifest): SystemAudioMode {
+  if (manifest.captureMode === "microphone+system") return "loopback";
+  if (manifest.captureMode === "system") return "share";
+  return "off";
 }
 
 export function buildDashboardSnapshot(input: {

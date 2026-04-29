@@ -10,7 +10,7 @@ export interface SegmentFileEntry {
 export function collectSegmentDescriptors(entries: SegmentFileEntry[], now: number, allowNewestOpenSegment: boolean): SegmentDescriptor[] {
   const parsed = entries
     .map((entry) => {
-      const match = entry.name.match(/^segment-(\d{4})\.mp3$/i);
+      const match = entry.name.match(/^segment-(\d{4})\.(mp3|wav)$/i);
       if (!match || !entry.isFile) return null;
       return {
         index: Number(match[1]),

@@ -1,6 +1,10 @@
 import type { App } from "obsidian";
 import { getSelectedSummaryModel } from "../../domain/providers";
-import type { PluginSettingsV2 } from "../../domain/settings";
+import {
+  type CaptureEngine,
+  type PluginSettingsV2,
+  type SystemAudioMode,
+} from "../../domain/settings";
 import type { DiagnosticsSummary, RecordingSessionManifest } from "../../domain/session";
 import type { ScenarioTemplate } from "../../domain/scenarios";
 import { getVaultBasePath, getVaultConfigDir, requireNodeModule } from "../node";
@@ -21,6 +25,7 @@ interface FsModule {
 
 interface PathModule {
   join: (...parts: string[]) => string;
+  extname: (path: string) => string;
 }
 
 export class SessionStore {
@@ -51,7 +56,9 @@ export class SessionStore {
     const diagnosticsLogPath = path.join(rootDir, "diagnostics.log");
     const transcriptTextPath = path.join(transcriptDir, "live-transcript.txt");
     const summaryMarkdownPath = path.join(summaryDir, "summary.md");
-    const fullAudioPath = path.join(audioDir, "recording.mp3");
+    const captureEngine: CaptureEngine = "web";
+    const fullAudioFilename = "recording.wav";
+    const fullAudioPath = path.join(audioDir, fullAudioFilename);
 
     for (const dir of [this.getSessionsRootDir(), rootDir, audioDir, segmentsDir, transcriptDir, summaryDir]) {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -61,13 +68,15 @@ export class SessionStore {
     fs.writeFileSync(diagnosticsLogPath, "", { encoding: "utf8" });
 
     const manifest: RecordingSessionManifest = {
-      schemaVersion: 1,
+      schemaVersion: 3,
       sessionId,
       createdAt,
       updatedAt: createdAt,
       scenarioKey: scenario.key,
       scenarioLabel: scenario.label,
-      captureMode: settings.capture.systemDevice.trim() ? "microphone+system" : "microphone",
+      captureEngine,
+      systemAudioMode: settings.capture.systemAudioMode,
+      captureMode: deriveCaptureMode(settings.capture.systemAudioMode),
       status: "preflight",
       paths: {
         rootDir,
@@ -238,8 +247,13 @@ export class SessionStore {
 
   private normalizeManifest(manifest: RecordingSessionManifest): RecordingSessionManifest {
     const fallbackTimestamp = manifest.updatedAt || manifest.createdAt || new Date().toISOString();
+    const captureEngine = manifest.captureEngine ?? inferLegacyCaptureEngine(manifest);
+    const systemAudioMode = manifest.systemAudioMode ?? inferLegacySystemAudioMode(manifest);
     const normalized: RecordingSessionManifest = {
       ...manifest,
+      schemaVersion: 3,
+      captureEngine,
+      systemAudioMode,
       notes: manifest.notes ?? {},
       diagnosticsSummary: manifest.diagnosticsSummary ?? {
         checkedAt: fallbackTimestamp,
@@ -297,4 +311,28 @@ export class SessionStore {
     if (!path || !fs.existsSync(path)) return "";
     return String(fs.readFileSync(path, { encoding: "utf8" }));
   }
+}
+
+function inferLegacyCaptureEngine(manifest: RecordingSessionManifest): CaptureEngine {
+  return manifest.paths.fullAudioPath.toLowerCase().endsWith(".wav") ? "web" : "ffmpeg";
+}
+
+function inferLegacySystemAudioMode(manifest: RecordingSessionManifest): SystemAudioMode {
+  if (manifest.captureMode === "microphone+system") {
+    return "loopback";
+  }
+  if (manifest.captureMode === "system") {
+    return "share";
+  }
+  return "off";
+}
+
+function deriveCaptureMode(systemAudioMode: SystemAudioMode): RecordingSessionManifest["captureMode"] {
+  if (systemAudioMode === "share") {
+    return "system";
+  }
+  if (systemAudioMode === "loopback") {
+    return "microphone+system";
+  }
+  return "microphone";
 }

@@ -1,5 +1,5 @@
 import type { CaptureSettings } from "../../domain/settings";
-import { resolveCaptureBackend } from "../../domain/settings";
+import { isLoopbackSystemAudioEnabled, resolveCaptureBackend } from "../../domain/settings";
 import { scanDevices, type ListedDevice } from "../system/deviceScanner";
 
 export interface ResolvedCaptureInputs {
@@ -39,6 +39,7 @@ function findAvfoundationDevice(devices: ListedDevice[], name: string, label: st
 
 export async function resolveCaptureInputs(capture: CaptureSettings): Promise<ResolvedCaptureInputs> {
   const backend = resolveCaptureBackend(capture.backend);
+  const includeSystemAudio = isLoopbackSystemAudioEnabled(capture);
   if (backend === "avfoundation") {
     let devices: ListedDevice[] = [];
     try {
@@ -48,7 +49,7 @@ export async function resolveCaptureInputs(capture: CaptureSettings): Promise<Re
     } catch {}
 
     const resolvedMic = findAvfoundationDevice(devices, capture.microphoneDevice, capture.microphoneLabel) ?? devices[0];
-    const resolvedSystem = capture.systemDevice || capture.systemLabel
+    const resolvedSystem = includeSystemAudio && (capture.systemDevice || capture.systemLabel)
       ? findAvfoundationDevice(devices, capture.systemDevice, capture.systemLabel)
       : undefined;
 
@@ -65,7 +66,7 @@ export async function resolveCaptureInputs(capture: CaptureSettings): Promise<Re
     return {
       backend,
       micSpec: normalizeDshowDevice(capture.microphoneDevice || "audio=Microphone (default)"),
-      systemSpec: capture.systemDevice ? normalizeDshowDevice(capture.systemDevice) : "",
+      systemSpec: includeSystemAudio && capture.systemDevice ? normalizeDshowDevice(capture.systemDevice) : "",
       micLabel: capture.microphoneLabel,
       systemLabel: capture.systemLabel,
     };
@@ -74,7 +75,7 @@ export async function resolveCaptureInputs(capture: CaptureSettings): Promise<Re
   return {
     backend,
     micSpec: capture.microphoneDevice || "default",
-    systemSpec: capture.systemDevice || "",
+    systemSpec: includeSystemAudio ? capture.systemDevice || "" : "",
     micLabel: capture.microphoneLabel,
     systemLabel: capture.systemLabel,
   };

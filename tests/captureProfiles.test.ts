@@ -4,6 +4,8 @@ import { resolveAudioFilterChain, resolveAudioProfile, CAPTURE_PROFILE_LABELS } 
 import type { CaptureSettings } from "../src/domain/settings";
 
 const baseCapture: CaptureSettings = {
+  captureEngine: "ffmpeg",
+  systemAudioMode: "off",
   ffmpegPath: "/usr/bin/ffmpeg",
   backend: "avfoundation",
   microphoneDevice: ":2",
