@@ -1,6 +1,7 @@
 import { getSelectedSummaryModel, type SummaryProviderId } from "./providers";
 
 export type CaptureBackend = "auto" | "avfoundation" | "dshow" | "pulse" | "alsa";
+export type CaptureProfile = "transcription" | "balanced" | "natural" | "custom";
 
 export interface CaptureSettings {
   ffmpegPath: string;
@@ -13,6 +14,11 @@ export interface CaptureSettings {
   channels: 1 | 2;
   bitrateKbps: number;
   segmentDurationSeconds: number;
+  captureProfile: CaptureProfile;
+  micGainDb: number;
+  systemGainDb: number;
+  noiseSuppression: boolean;
+  limiter: boolean;
 }
 
 export interface TranscriptionSettings {
@@ -78,6 +84,11 @@ export const DEFAULT_SETTINGS_V2: PluginSettingsV2 = {
     channels: 2,
     bitrateKbps: 160,
     segmentDurationSeconds: 20,
+    captureProfile: "balanced",
+    micGainDb: 0,
+    systemGainDb: 0,
+    noiseSuppression: true,
+    limiter: true,
   },
   transcription: {
     whisperRepoPath: "",
@@ -122,6 +133,12 @@ function clampInteger(value: unknown, fallback: number, min: number, max: number
   return Math.max(min, Math.min(max, Math.floor(parsed)));
 }
 
+function clampFloat(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.round(Math.max(min, Math.min(max, parsed)) * 10) / 10;
+}
+
 function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
@@ -133,6 +150,7 @@ function asBoolean(value: unknown, fallback: boolean): boolean {
 function normalizeCaptureSettings(raw: unknown): CaptureSettings {
   const input = (raw ?? {}) as Partial<CaptureSettings>;
   const backend = input.backend;
+  const profile = input.captureProfile;
   return {
     ffmpegPath: asString(input.ffmpegPath),
     backend:
@@ -147,6 +165,14 @@ function normalizeCaptureSettings(raw: unknown): CaptureSettings {
     channels: clampInteger(input.channels, DEFAULT_SETTINGS_V2.capture.channels, 1, 2) === 1 ? 1 : 2,
     bitrateKbps: clampInteger(input.bitrateKbps, DEFAULT_SETTINGS_V2.capture.bitrateKbps, 64, 320),
     segmentDurationSeconds: clampInteger(input.segmentDurationSeconds, DEFAULT_SETTINGS_V2.capture.segmentDurationSeconds, 5, 300),
+    captureProfile:
+      profile === "transcription" || profile === "balanced" || profile === "natural" || profile === "custom"
+        ? profile
+        : DEFAULT_SETTINGS_V2.capture.captureProfile,
+    micGainDb: clampFloat(input.micGainDb, DEFAULT_SETTINGS_V2.capture.micGainDb, -12, 12),
+    systemGainDb: clampFloat(input.systemGainDb, DEFAULT_SETTINGS_V2.capture.systemGainDb, -12, 12),
+    noiseSuppression: asBoolean(input.noiseSuppression, DEFAULT_SETTINGS_V2.capture.noiseSuppression),
+    limiter: asBoolean(input.limiter, DEFAULT_SETTINGS_V2.capture.limiter),
   };
 }
 

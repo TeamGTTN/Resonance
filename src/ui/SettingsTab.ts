@@ -4,6 +4,7 @@ import type { SessionController } from "../application/SessionController";
 import type { DashboardSnapshot } from "../domain/dashboard";
 import type { SessionListItem } from "../domain/session";
 import { isCoreConfigured, resolveCaptureBackend, type PluginSettingsV2 } from "../domain/settings";
+import { CAPTURE_PROFILE_LABELS, getCaptureProfileDescription, resolveAudioFilterChain } from "../domain/captureProfiles";
 import { VaultAdapter } from "../infrastructure/adapters/VaultAdapter";
 import { requireNodeModule } from "../infrastructure/node";
 import {
@@ -530,6 +531,119 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
           }));
         })
       );
+
+    // ── Audio processing ───────────────────────────────────────────────────
+    const audioSection = this.createGuideSection(container, {
+      badge: "Audio",
+      title: uiCopy.capture.profileSection,
+      intro: uiCopy.capture.profileIntro,
+    });
+
+    // Troubleshooting callout
+    const tsBox = audioSection.createDiv({ cls: "rxn-inline-note is-info" });
+    tsBox.createEl("strong", { text: uiCopy.capture.troubleshooting.title });
+    const tsList = tsBox.createEl("ul", { cls: "rxn-guide-list" });
+    tsList.createEl("li", { text: uiCopy.capture.troubleshooting.robotic });
+    tsList.createEl("li", { text: uiCopy.capture.troubleshooting.inaccurate });
+    tsList.createEl("li", { text: uiCopy.capture.troubleshooting.noisy });
+
+    // Profile dropdown
+    const profileDesc = getCaptureProfileDescription(settings.capture.captureProfile);
+    new Setting(audioSection)
+      .setName(uiCopy.capture.profileLabel)
+      .setDesc(profileDesc)
+      .addDropdown((dropdown) => {
+        for (const [value, label] of Object.entries(CAPTURE_PROFILE_LABELS)) {
+          dropdown.addOption(value, label);
+        }
+        dropdown.setValue(settings.capture.captureProfile);
+        dropdown.onChange(async (value) => {
+          await this.options.saveSettings((current) => ({
+            ...current,
+            capture: { ...current.capture, captureProfile: value as PluginSettingsV2["capture"]["captureProfile"] },
+          }));
+          await this.display();
+        });
+      });
+
+    // Custom profile controls (only shown when profile = custom)
+    if (settings.capture.captureProfile === "custom") {
+      const customSection = this.createGuideSection(container, {
+        badge: "Custom",
+        title: uiCopy.capture.customSection,
+        intro: uiCopy.capture.customIntro,
+      });
+
+      new Setting(customSection)
+        .setName(uiCopy.capture.micGainLabel)
+        .setDesc(uiCopy.capture.micGainDesc)
+        .addText((text) =>
+          text
+            .setPlaceholder("0")
+            .setValue(String(settings.capture.micGainDb))
+            .onChange(async (value) => {
+              const parsed = parseFloat(value);
+              if (!Number.isFinite(parsed)) return;
+              await this.options.saveSettings((current) => ({
+                ...current,
+                capture: { ...current.capture, micGainDb: Math.max(-12, Math.min(12, parsed)) },
+              }));
+            })
+        );
+
+      new Setting(customSection)
+        .setName(uiCopy.capture.systemGainLabel)
+        .setDesc(uiCopy.capture.systemGainDesc)
+        .addText((text) =>
+          text
+            .setPlaceholder("0")
+            .setValue(String(settings.capture.systemGainDb))
+            .onChange(async (value) => {
+              const parsed = parseFloat(value);
+              if (!Number.isFinite(parsed)) return;
+              await this.options.saveSettings((current) => ({
+                ...current,
+                capture: { ...current.capture, systemGainDb: Math.max(-12, Math.min(12, parsed)) },
+              }));
+            })
+        );
+
+      new Setting(customSection)
+        .setName(uiCopy.capture.noiseSuppressionLabel)
+        .setDesc(uiCopy.capture.noiseSuppressionDesc)
+        .addToggle((toggle) =>
+          toggle.setValue(settings.capture.noiseSuppression).onChange(async (value) => {
+            await this.options.saveSettings((current) => ({
+              ...current,
+              capture: { ...current.capture, noiseSuppression: value },
+            }));
+          })
+        );
+
+      new Setting(customSection)
+        .setName(uiCopy.capture.limiterLabel)
+        .setDesc(uiCopy.capture.limiterDesc)
+        .addToggle((toggle) =>
+          toggle.setValue(settings.capture.limiter).onChange(async (value) => {
+            await this.options.saveSettings((current) => ({
+              ...current,
+              capture: { ...current.capture, limiter: value },
+            }));
+          })
+        );
+    }
+
+    // Filter preview — always visible
+    const hasDual = Boolean(settings.capture.systemDevice || settings.capture.systemLabel);
+    const { filterPreview } = resolveAudioFilterChain(settings.capture, hasDual);
+    const previewSetting = new Setting(audioSection)
+      .setName(uiCopy.capture.filterPreviewLabel)
+      .setDesc(uiCopy.capture.filterPreviewDesc);
+    const previewEl = previewSetting.controlEl.createEl("code", {
+      text: filterPreview,
+      cls: "rxn-filter-preview",
+    });
+    previewEl.setAttribute("title", filterPreview);
   }
 
   private async renderTranscriptionTab(container: HTMLElement) {

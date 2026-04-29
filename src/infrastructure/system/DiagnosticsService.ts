@@ -8,6 +8,7 @@ import {
   type PluginSettingsV2,
 } from "../../domain/settings";
 import type { DiagnosticCheck, DiagnosticsReport } from "../../domain/diagnostics";
+import { CAPTURE_PROFILE_LABELS } from "../../domain/captureProfiles";
 import { requireNodeModule } from "../node";
 import { resolveCaptureInputs } from "../adapters/captureUtils";
 import { WhisperTranscriptionAdapter } from "../adapters/TranscriptionAdapter";
@@ -158,6 +159,19 @@ export class DiagnosticsService {
         ? `Target vault folder: ${settings.output.vaultFolder}`
         : "The session folder will be created at the vault root.",
       remediation: "Set a dedicated output folder if you want generated notes grouped together.",
+    });
+
+    const profileLabel = CAPTURE_PROFILE_LABELS[settings.capture.captureProfile];
+    const transcriptionWithNonStandardRate =
+      settings.capture.captureProfile === "transcription" && settings.capture.sampleRateHz !== 48000;
+    addCheck({
+      id: "capture-profile",
+      label: "Audio processing profile",
+      severity: transcriptionWithNonStandardRate ? "warning" : "ok",
+      detail: transcriptionWithNonStandardRate
+        ? `Profile: ${profileLabel}. Sample rate ${settings.capture.sampleRateHz} Hz with the Transcription profile can cause extra resampling artifacts. Consider switching to 48000 Hz.`
+        : `Profile: ${profileLabel}. Active on next recording.`,
+      remediation: "Switch to Balanced or Natural profile if audio sounds robotic, or set sample rate to 48000 Hz.",
     });
 
     const blockingIssueIds = checks.filter((check) => check.severity === "error").map((check) => check.id);

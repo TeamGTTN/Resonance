@@ -1,6 +1,7 @@
 import type { CaptureSettings } from "../../domain/settings";
 import { requireNodeModule } from "../node";
 import { resolveCaptureInputs, type ResolvedCaptureInputs } from "./captureUtils";
+import { resolveAudioFilterChain } from "../../domain/captureProfiles";
 
 interface ChildProcessModule {
   spawn: typeof import("node:child_process").spawn;
@@ -59,16 +60,7 @@ export class AudioCaptureAdapter {
     const { spawn } = requireNodeModule<ChildProcessModule>("child_process");
     const segmentPattern = path.join(options.segmentsDir, "segment-%04d.mp3");
     const shouldMix = Boolean(resolvedInputs.micSpec && resolvedInputs.systemSpec);
-    const speechPrep = "highpass=f=80,lowpass=f=7000";
-    const filterArgs = shouldMix
-      ? [
-          "-filter_complex",
-          `[0:a]${speechPrep},volume=2.15[mic];` +
-            `[1:a]volume=1.0[sys];` +
-            `[mic][sys]amix=inputs=2:duration=longest:weights='1.65 0.75':normalize=0,alimiter=limit=0.95[aout]`,
-        ]
-      : ["-af", `${speechPrep},volume=2.15,alimiter=limit=0.95`];
-    const mapArgs = shouldMix ? ["-map", "[aout]"] : ["-map", "0:a"];
+    const { filterArgs, mapArgs } = resolveAudioFilterChain(options.settings, shouldMix);
     const sampleRate = Math.max(8_000, Math.floor(options.settings.sampleRateHz));
     const channels = options.settings.channels === 1 ? 1 : 2;
     const bitrate = Math.max(64, Math.floor(options.settings.bitrateKbps));
