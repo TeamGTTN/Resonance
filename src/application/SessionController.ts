@@ -1,7 +1,7 @@
 import type { App } from "obsidian";
 import { getScenario } from "../domain/scenarios";
 import { buildDiagnosticsSummary, type RecordingSessionManifest, type SessionListItem, type SessionRuntimeSnapshot, type SessionState } from "../domain/session";
-import { resolveCaptureRuntime, type PluginSettingsV2 } from "../domain/settings";
+import type { PluginSettings } from "../domain/settings";
 import { OrderedSegmentQueue, type SegmentDescriptor } from "./OrderedSegmentQueue";
 import { deriveSessionListItem } from "./dashboard";
 import { WebCaptureAdapter } from "../infrastructure/adapters/WebCaptureAdapter";
@@ -15,8 +15,8 @@ import { formatTranscriptChunkMarkdown, normalizeCheckboxes, sanitizeSummary } f
 interface SessionControllerOptions {
   app: App;
   pluginId: string;
-  getSettings: () => PluginSettingsV2;
-  saveSettings: (updater: (current: PluginSettingsV2) => PluginSettingsV2) => Promise<void>;
+  getSettings: () => PluginSettings;
+  saveSettings: (updater: (current: PluginSettings) => PluginSettings) => Promise<void>;
 }
 
 const STARTABLE_STATES = new Set<SessionState>(["idle", "done", "failed"]);
@@ -35,7 +35,6 @@ export class SessionController {
   private captureAdapter: ActiveCaptureRuntime | null = null;
   private queue: OrderedSegmentQueue | null = null;
   private manifest: RecordingSessionManifest | null = null;
-  private segmentPollerId: number | null = null;
   private elapsedTimerId: number | null = null;
   private startedAtMs: number | null = null;
   private stopRequested = false;
@@ -96,7 +95,7 @@ export class SessionController {
     }
 
     await this.store.appendDiagnostics(manifest, "Manual recovery: transcript regeneration started.");
-    const transcriptionAdapter = new WhisperTranscriptionAdapter(settings.transcription, settings.capture.ffmpegPath);
+    const transcriptionAdapter = new WhisperTranscriptionAdapter(settings.transcription);
     const transcript = (await transcriptionAdapter.transcribeFile(manifest.paths.fullAudioPath)).trim();
     if (!transcript) {
       await this.store.appendDiagnostics(manifest, "Manual recovery: transcript regeneration returned empty output.");
@@ -166,7 +165,6 @@ export class SessionController {
     this.resetSnapshot();
     const settings = this.options.getSettings();
     const scenario = getScenario(scenarioKey);
-    const captureRuntime = resolveCaptureRuntime(settings.capture);
     this.stopRequested = false;
 
     try {
@@ -185,7 +183,7 @@ export class SessionController {
       this.manifest.notes.liveTranscriptNotePath = workspace.liveTranscriptNotePath;
       await this.store.writeManifest(this.manifest);
 
-      const transcriptionAdapter = new WhisperTranscriptionAdapter(settings.transcription, settings.capture.ffmpegPath);
+      const transcriptionAdapter = new WhisperTranscriptionAdapter(settings.transcription);
       this.queue = new OrderedSegmentQueue(async (segment) => {
         await this.commitSegment(segment, transcriptionAdapter);
       }, Math.max(0, this.manifest.live.lastCommittedSegment + 1));
@@ -196,16 +194,8 @@ export class SessionController {
         fullAudioPath: this.manifest.paths.fullAudioPath,
         segmentsDir: this.manifest.paths.segmentsDir,
         segmentDurationSeconds: settings.capture.segmentDurationSeconds,
-        microphoneDevice: settings.capture.microphoneDevice,
-        additionalSources:
-          captureRuntime === "web-multi-input" && settings.capture.systemDevice.trim()
-            ? [
-                {
-                  deviceId: settings.capture.systemDevice.trim(),
-                  label: settings.capture.systemLabel.trim() || "Additional source",
-                },
-              ]
-            : [],
+        microphoneDevice: settings.capture.microphone.deviceId,
+        additionalSources: settings.capture.additionalSources,
         onSegmentReady: (segment) => {
           this.queue?.enqueue([segment]);
           this.refreshQueueSnapshot();
@@ -255,7 +245,6 @@ export class SessionController {
       manifest.runtime.elapsedSeconds = frozenElapsedSeconds;
       this.transition("stopping", "Stopping recorder and flushing live transcript...");
       await this.store.writeManifest(manifest);
-      this.stopSegmentPolling();
       await this.captureAdapter.stop();
       manifest.artifacts.hasAudio = true;
       manifest.runtime.elapsedSeconds = frozenElapsedSeconds;
@@ -371,13 +360,6 @@ export class SessionController {
     }
   }
 
-  private stopSegmentPolling() {
-    if (this.segmentPollerId !== null) {
-      window.clearInterval(this.segmentPollerId);
-      this.segmentPollerId = null;
-    }
-  }
-
   private refreshQueueSnapshot() {
     if (!this.queue) {
       this.patchSnapshot({ queuedSegments: 0 });
@@ -482,7 +464,6 @@ export class SessionController {
   private async failSession(message: string) {
     if (this.snapshot.state === "failed" && !this.manifest) return;
     this.stopRequested = true;
-    this.stopSegmentPolling();
     this.stopElapsedTimer();
 
     const manifest = this.manifest;
@@ -504,7 +485,6 @@ export class SessionController {
   }
 
   private async cleanupRuntime() {
-    this.stopSegmentPolling();
     this.stopElapsedTimer();
     await this.stopCaptureIfRunning();
     this.captureAdapter = null;

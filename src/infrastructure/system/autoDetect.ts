@@ -21,30 +21,6 @@ interface PathModule {
   join: (...parts: string[]) => string;
 }
 
-export async function autoDetectFfmpeg(): Promise<string | null> {
-  const fromPath = await detectCommandInPath("ffmpeg");
-  if (fromPath) return fromPath;
-
-  try {
-    const fs = requireNodeModule<FsModule>("fs");
-    const candidates =
-      process.platform === "win32"
-        ? [
-            "C:/ffmpeg/bin/ffmpeg.exe",
-            "C:/Program Files/ffmpeg/bin/ffmpeg.exe",
-            "C:/Program Files (x86)/ffmpeg/bin/ffmpeg.exe",
-            "C:/ProgramData/chocolatey/bin/ffmpeg.exe",
-          ]
-        : ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"];
-
-    for (const candidate of candidates) {
-      if (fs.existsSync(candidate)) return candidate;
-    }
-  } catch {}
-
-  return null;
-}
-
 export async function autoDetectWhisperRepo(): Promise<string | null> {
   const cliFromPath = await autoDetectWhisperCli(undefined, true);
   const inferred = inferWhisperRepoPath(cliFromPath);

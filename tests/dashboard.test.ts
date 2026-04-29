@@ -7,9 +7,9 @@ import type { RecordingSessionManifest, SessionRuntimeSnapshot } from "../src/do
 const diagnosticsReport: DiagnosticsReport = {
   checkedAt: "2026-04-22T08:00:00.000Z",
   provider: "ollama",
-  backend: "avfoundation",
+  capture: "web-audio",
   checks: [
-    { id: "ffmpeg", label: "FFmpeg", severity: "ok", detail: "Ready." },
+    { id: "web-audio", label: "Web Audio capture", severity: "ok", detail: "Ready." },
     { id: "ollama", label: "Ollama", severity: "warning", detail: "Slow response." },
     { id: "model", label: "Whisper model", severity: "error", detail: "Missing model." },
   ],
@@ -20,15 +20,17 @@ const diagnosticsReport: DiagnosticsReport = {
 };
 
 const manifest: RecordingSessionManifest = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   sessionId: "session-1",
   createdAt: "2026-04-22T08:00:00.000Z",
   updatedAt: "2026-04-22T08:30:00.000Z",
   scenarioKey: "work_meeting",
   scenarioLabel: "Meeting",
   captureMode: "microphone",
-  captureEngine: "web",
-  systemAudioMode: "off",
+  captureSources: {
+    microphone: { deviceId: "", label: "System default input" },
+    additionalSources: [],
+  },
   status: "failed",
   paths: {
     rootDir: "/tmp/session-1",
@@ -92,23 +94,35 @@ test("deriveSessionListItem exposes dashboard and library metadata", () => {
   assert.equal(item.sourceLabel, "Microphone");
 });
 
-test("deriveSessionListItem labels multi-source web sessions clearly", () => {
+test("deriveSessionListItem labels multi-input sessions clearly", () => {
   const item = deriveSessionListItem(
     {
       ...manifest,
       sessionId: "session-2",
-      captureMode: "microphone+system",
-      captureEngine: "web",
-      systemAudioMode: "loopback",
+      captureMode: "multiple-input",
+      captureSources: {
+        microphone: { deviceId: "mic-1", label: "USB Microphone" },
+        additionalSources: [
+          { deviceId: "loopback-1", label: "BlackHole 2ch" },
+          { deviceId: "loopback-2", label: "Monitor Source" },
+        ],
+      },
     },
     24_000
   );
 
-  assert.equal(item.sourceLabel, "Microphone + additional source");
+  assert.equal(item.sourceLabel, "Microphone + 2 extra sources");
 });
 
 test("deriveSessionHealthBadge marks finalizing sessions as warning", () => {
-  assert.equal(deriveSessionHealthBadge({ ...manifest, status: "stopping", runtime: { ...manifest.runtime, failureSummary: undefined } }), "warning");
+  assert.equal(
+    deriveSessionHealthBadge({
+      ...manifest,
+      status: "stopping",
+      runtime: { ...manifest.runtime, failureSummary: undefined },
+    }),
+    "warning"
+  );
 });
 
 test("buildDashboardSnapshot blocks start when diagnostics fail", () => {

@@ -3,7 +3,7 @@ import { buildDashboardSnapshot, deriveSessionListItem } from "../application/da
 import type { SessionController } from "../application/SessionController";
 import type { DashboardSnapshot } from "../domain/dashboard";
 import type { SessionListItem } from "../domain/session";
-import { isCoreConfigured, type PluginSettingsV2 } from "../domain/settings";
+import { isCoreConfigured, type PluginSettings } from "../domain/settings";
 import { VaultAdapter } from "../infrastructure/adapters/VaultAdapter";
 import { requireNodeModule } from "../infrastructure/node";
 import {
@@ -29,8 +29,8 @@ type LibraryFilter = "all" | "done" | "failed";
 
 interface SettingsTabOptions {
   pluginId: string;
-  getSettings: () => PluginSettingsV2;
-  saveSettings: (updater: (current: PluginSettingsV2) => PluginSettingsV2) => Promise<void>;
+  getSettings: () => PluginSettings;
+  saveSettings: (updater: (current: PluginSettings) => PluginSettings) => Promise<void>;
   controller: SessionController;
 }
 
@@ -293,7 +293,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
         }`,
       cls: "rxn-pill",
     });
-    meta.createEl("span", { text: `Backend: ${snapshot.health.report?.backend ?? "n/a"}`, cls: "rxn-pill" });
+    meta.createEl("span", { text: `Capture: ${snapshot.health.report?.capture ?? "web-audio"}`, cls: "rxn-pill" });
 
     if (this.smokeMessage) {
       const smoke = intro.createDiv({ cls: `rxn-inline-note ${this.smokeMessage.includes("failed") ? "is-failed" : "is-healthy"}` });
@@ -366,35 +366,20 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
   }
 
   private async renderCaptureTab(container: HTMLElement) {
-    let settings = this.options.getSettings();
-    if (settings.capture.captureEngine !== "web" || settings.capture.systemAudioMode === "share") {
-      await this.options.saveSettings((current) => ({
-        ...current,
-        capture: {
-          ...current.capture,
-          captureEngine: "web",
-          systemAudioMode: current.capture.systemAudioMode === "share" ? "off" : current.capture.systemAudioMode,
-        },
-      }));
-      settings = this.options.getSettings();
-    }
-
-    await this.renderWebCaptureTab(container, settings);
-  }
-
-  private async renderWebCaptureTab(container: HTMLElement, settings: PluginSettingsV2) {
+    const settings = this.options.getSettings();
     const deviceSnapshot = await listWebAudioInputDevices().catch<WebAudioDeviceSnapshot>(() => ({
       devices: [],
       permissionState: "unknown",
       labelsAvailable: false,
     }));
-    const additionalSourceEnabled =
-      settings.capture.systemAudioMode === "loopback" && Boolean(settings.capture.systemDevice.trim());
+    const selectedAdditionalIds = new Set(settings.capture.additionalSources.map((source) => source.deviceId));
+    const selectedMicrophoneId = settings.capture.microphone.deviceId;
+    const selectedMicrophoneLabel = settings.capture.microphone.label.trim();
 
     const capture = this.createGuideSection(container, {
       badge: "Devices",
       title: "Audio sources",
-      intro: "Resonance now records through one Web Audio graph. Choose the microphone first, then optionally add a second input such as BlackHole, VB-Cable, or a monitor source.",
+      intro: "Resonance records through one Web Audio graph. Choose the microphone first, then add any extra audioinput sources you want in the same recording.",
     });
 
     const meta = capture.createDiv({ cls: "rxn-pill-row rxn-diagnostics-meta" });
@@ -422,7 +407,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       );
     const micSelect = micSetting.controlEl.createEl("select");
     micSelect.addClass("rxn-inline-select");
-    this.populateWebAudioInputs(micSelect, deviceSnapshot, settings.capture.microphoneDevice, {
+    this.populateWebAudioInputs(micSelect, deviceSnapshot, settings.capture.microphone.deviceId, {
       defaultLabel: "System default input",
     });
     micSelect.addEventListener("change", async () => {
@@ -431,40 +416,75 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
         ...current,
         capture: {
           ...current.capture,
-          captureEngine: "web",
-          microphoneDevice: selected?.value === "default" ? "" : selected?.value ?? "",
-          microphoneLabel: selected?.text ?? "",
+          microphone: {
+            deviceId: selected?.value === "default" ? "" : selected?.value ?? "",
+            label: selected?.text ?? "",
+          },
+          additionalSources: current.capture.additionalSources.filter((source) => source.deviceId !== (selected?.value === "default" ? "" : selected?.value ?? "")),
         },
       }));
+      await this.display();
     });
 
-    const systemSetting = new Setting(capture)
-      .setName("Additional source")
-      .setDesc(
-        deviceSnapshot.labelsAvailable
-          ? "Optional second input. Select a loopback device here if you want Teams, Meet, browser tabs, or desktop audio in the same recording."
-          : "Optional second input. Grant permission once to reveal clearer device labels for loopback devices too."
-      );
-    const systemSelect = systemSetting.controlEl.createEl("select");
-    systemSelect.addClass("rxn-inline-select");
-    this.populateWebAudioInputs(systemSelect, deviceSnapshot, additionalSourceEnabled ? settings.capture.systemDevice : "", {
-      includeOff: true,
-      offLabel: "Off (microphone only)",
+    capture.createEl("h4", { text: "Additional sources", cls: "rxn-section-title" });
+    capture.createEl("p", {
+      cls: "rxn-muted",
+      text:
+        "Optional. Add loopback or monitor inputs here if you want Teams, Meet, browser tabs, or desktop audio in the same recording.",
     });
-    systemSelect.addEventListener("change", async () => {
-      const selected = systemSelect.options[systemSelect.selectedIndex];
-      const enabled = Boolean(selected?.value);
-      await this.options.saveSettings((current) => ({
-        ...current,
-        capture: {
-          ...current.capture,
-          captureEngine: "web",
-          systemAudioMode: enabled ? "loopback" : "off",
-          systemDevice: enabled ? selected.value : "",
-          systemLabel: enabled ? selected.text : "",
-        },
-      }));
-    });
+
+    const additionalSourceCandidates = deviceSnapshot.devices.filter(
+      (device) =>
+        !device.isDefault &&
+        device.deviceId !== selectedMicrophoneId &&
+        !(selectedMicrophoneId === "" && selectedMicrophoneLabel && device.label.trim() === selectedMicrophoneLabel)
+    );
+    const staleAdditionalCount = settings.capture.additionalSources.filter(
+      (source) =>
+        !deviceSnapshot.devices.some((device) => device.deviceId === source.deviceId) ||
+        source.deviceId === selectedMicrophoneId
+    ).length;
+
+    if (staleAdditionalCount > 0) {
+      const stale = capture.createDiv({ cls: "rxn-inline-note is-warning" });
+      stale.createEl("strong", { text: "Saved sources need review" });
+      stale.createEl("p", {
+        text: `${staleAdditionalCount} saved additional source${staleAdditionalCount === 1 ? "" : "s"} are unavailable or conflict with the microphone and will be ignored until you update them.`,
+      });
+    }
+
+    if (additionalSourceCandidates.length === 0) {
+      capture.createEl("p", {
+        cls: "rxn-muted",
+        text: "No additional audio inputs are currently available.",
+      });
+    } else {
+      additionalSourceCandidates.forEach((device) => {
+        new Setting(capture)
+          .setName(device.label)
+          .setDesc(device.groupId ? `Input ID: ${device.deviceId}` : "Additional input source")
+          .addToggle((toggle) =>
+            toggle.setValue(selectedAdditionalIds.has(device.deviceId)).onChange(async (enabled) => {
+              await this.options.saveSettings((current) => {
+                const nextSources = current.capture.additionalSources.filter(
+                  (source) => source.deviceId !== device.deviceId
+                );
+                if (enabled) {
+                  nextSources.push({ deviceId: device.deviceId, label: device.label });
+                }
+                return {
+                  ...current,
+                  capture: {
+                    ...current.capture,
+                    additionalSources: nextSources,
+                  },
+                };
+              });
+              await this.display();
+            })
+          );
+      });
+    }
 
     new Setting(capture)
       .setName("Segment seconds")
@@ -594,7 +614,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
             ...current,
             transcription: {
               ...current.transcription,
-              modelPreset: value as PluginSettingsV2["transcription"]["modelPreset"],
+              modelPreset: value as PluginSettings["transcription"]["modelPreset"],
             },
           }));
           await this.display();
@@ -776,7 +796,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
         dropdown.onChange(async (value) => {
           await this.options.saveSettings((current) => ({
             ...current,
-            summary: { ...current.summary, provider: value as PluginSettingsV2["summary"]["provider"] },
+            summary: { ...current.summary, provider: value as PluginSettings["summary"]["provider"] },
           }));
           await this.display();
         });
@@ -818,7 +838,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
         text.setValue(settings.summary[apiKeyField]).onChange(async (value) => {
           await this.options.saveSettings((current) => ({
             ...current,
-            summary: { ...current.summary, [apiKeyField]: value } as PluginSettingsV2["summary"],
+            summary: { ...current.summary, [apiKeyField]: value } as PluginSettings["summary"],
           }));
         });
         text.inputEl.type = "password";
@@ -827,7 +847,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
         text.setValue(settings.summary[modelField]).onChange(async (value) => {
           await this.options.saveSettings((current) => ({
             ...current,
-            summary: { ...current.summary, [modelField]: value } as PluginSettingsV2["summary"],
+            summary: { ...current.summary, [modelField]: value } as PluginSettings["summary"],
           }));
         })
       );
@@ -1258,11 +1278,11 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     pre.setText(code);
   }
 
-  private getWhisperModelLabel(preset: PluginSettingsV2["transcription"]["modelPreset"]): string {
+  private getWhisperModelLabel(preset: PluginSettings["transcription"]["modelPreset"]): string {
     return preset.charAt(0).toUpperCase() + preset.slice(1);
   }
 
-  private getWhisperModelFilename(preset: PluginSettingsV2["transcription"]["modelPreset"]): string {
+  private getWhisperModelFilename(preset: PluginSettings["transcription"]["modelPreset"]): string {
     return `ggml-${preset}.bin`;
   }
 
@@ -1361,7 +1381,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     const pathModule = requireNodeModule<{ extname: (path: string) => string }>("path");
     const fs = requireNodeModule<{ readFileSync: (path: string) => Buffer }>("fs");
     const bytes = Uint8Array.from(fs.readFileSync(item.paths.fullAudioPath));
-    const extension = pathModule.extname(item.paths.fullAudioPath) || ".mp3";
+    const extension = pathModule.extname(item.paths.fullAudioPath) || ".wav";
     const blob = new Blob([bytes], { type: this.getAudioMimeType(item.paths.fullAudioPath) });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");

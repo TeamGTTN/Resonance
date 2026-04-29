@@ -2,10 +2,9 @@ import type { App } from "obsidian";
 import { getProviderCapabilities } from "../../domain/providers";
 import {
   getSelectedProviderApiKey,
-  isLikelyTestWhisperModelPath,
   isCoreConfigured,
-  isLoopbackSystemAudioEnabled,
-  type PluginSettingsV2,
+  isLikelyTestWhisperModelPath,
+  type PluginSettings,
 } from "../../domain/settings";
 import type { DiagnosticCheck, DiagnosticsReport } from "../../domain/diagnostics";
 import { requireNodeModule } from "../node";
@@ -26,7 +25,7 @@ export interface SmokeTestResult {
 export class DiagnosticsService {
   constructor(private readonly app: App) {}
 
-  async run(settings: PluginSettingsV2): Promise<DiagnosticsReport> {
+  async run(settings: PluginSettings): Promise<DiagnosticsReport> {
     const fs = requireNodeModule<{
       accessSync: (path: string, mode?: number) => void;
       constants: { F_OK: number; R_OK: number; X_OK: number };
@@ -34,8 +33,6 @@ export class DiagnosticsService {
       statSync: (path: string) => { size: number };
     }>("fs");
     const checks: DiagnosticCheck[] = [];
-    const loopbackEnabled = isLoopbackSystemAudioEnabled(settings.capture);
-    const backend = "web";
     const addCheck = (check: DiagnosticCheck) => checks.push(check);
     const fileMode = process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK;
 
@@ -54,8 +51,6 @@ export class DiagnosticsService {
       severity: isCoreConfigured(settings) ? "ok" : "error",
       detail: isCoreConfigured(settings)
         ? "Core local-first path is configured."
-        : loopbackEnabled
-        ? "Web Audio capture is ready, but the additional source, transcription, or summary configuration is still incomplete."
         : "Web Audio capture is ready, but transcription or summary configuration is still incomplete.",
       remediation: "Open Setup & Settings in the plugin settings tab and complete the missing dependency step.",
     });
@@ -67,6 +62,7 @@ export class DiagnosticsService {
       permissionState,
       labelsAvailable: false,
     }));
+    const availableIds = new Set(deviceSnapshot.devices.map((device) => device.deviceId));
 
     addCheck({
       id: "web-audio",
@@ -91,8 +87,8 @@ export class DiagnosticsService {
       remediation: "Grant microphone permission and check the OS input devices if the list stays empty.",
     });
 
-    const selectedMic = settings.capture.microphoneDevice.trim();
-    const selectedMicPresent = !selectedMic || deviceSnapshot.devices.some((device) => device.deviceId === selectedMic);
+    const selectedMic = settings.capture.microphone.deviceId.trim();
+    const selectedMicPresent = !selectedMic || availableIds.has(selectedMic);
     addCheck({
       id: "selected-microphone",
       label: "Selected microphone",
@@ -105,38 +101,40 @@ export class DiagnosticsService {
       remediation: "Choose a microphone device if you want to pin one instead of following the OS default.",
     });
 
-    if (loopbackEnabled) {
-      const selectedAdditional = settings.capture.systemDevice.trim();
-      const selectedAdditionalPresent = Boolean(
-        selectedAdditional && deviceSnapshot.devices.some((device) => device.deviceId === selectedAdditional)
-      );
-      const duplicateSource =
-        Boolean(selectedAdditional) &&
-        selectedAdditionalPresent &&
-        selectedMic &&
-        selectedAdditional === selectedMic;
-
-      addCheck({
-        id: "selected-additional-source",
-        label: "Additional source",
-        severity: !selectedAdditional
-          ? "error"
-          : duplicateSource
-          ? "error"
-          : selectedAdditionalPresent
-          ? "ok"
-          : "warning",
-        detail: !selectedAdditional
-          ? "Additional source is enabled, but no second input device is selected."
-          : duplicateSource
-          ? "The additional source matches the microphone. Pick a different input such as BlackHole or VB-Cable."
-          : selectedAdditionalPresent
-          ? "Selected additional source is available."
-          : "Selected additional source is unavailable. Refresh devices or disable it.",
-        remediation:
-          "Select a second audioinput device such as BlackHole, VB-Cable, or a monitor source if you want multiple sources in the same recording.",
-      });
+    const additionalSources = settings.capture.additionalSources;
+    const duplicateIds = new Set<string>();
+    const seenIds = new Set<string>();
+    const missingSources = additionalSources.filter((source) => !availableIds.has(source.deviceId));
+    const sameAsMicSources = selectedMic
+      ? additionalSources.filter((source) => source.deviceId === selectedMic)
+      : [];
+    for (const source of additionalSources) {
+      if (seenIds.has(source.deviceId)) {
+        duplicateIds.add(source.deviceId);
+      }
+      seenIds.add(source.deviceId);
     }
+
+    addCheck({
+      id: "additional-sources",
+      label: "Additional sources",
+      severity:
+        duplicateIds.size > 0 || sameAsMicSources.length > 0 || missingSources.length > 0
+          ? "warning"
+          : "ok",
+      detail:
+        additionalSources.length === 0
+          ? "No additional sources selected. Recording will use only the microphone."
+          : duplicateIds.size > 0
+            ? "Some additional sources are duplicated and will be ignored."
+            : sameAsMicSources.length > 0
+              ? "Some additional sources match the selected microphone and will be ignored."
+              : missingSources.length > 0
+                ? `${missingSources.length} selected additional source${missingSources.length === 1 ? "" : "s"} are unavailable and will be skipped.`
+                : `${additionalSources.length} additional source${additionalSources.length === 1 ? "" : "s"} selected for the recording mix.`,
+      remediation:
+        "Keep only the extra audioinput devices you actually want to mix in, such as loopback or monitor inputs.",
+    });
 
     addCheck({
       id: "whisper-cli",
@@ -193,7 +191,7 @@ export class DiagnosticsService {
     return {
       checkedAt: new Date().toISOString(),
       provider: settings.summary.provider,
-      backend,
+      capture: "web-audio",
       checks,
       blockingIssueIds,
       warningIds,
@@ -205,15 +203,10 @@ export class DiagnosticsService {
     };
   }
 
-  async runSmokeTest(settings: PluginSettingsV2): Promise<SmokeTestResult> {
+  async runSmokeTest(settings: PluginSettings): Promise<SmokeTestResult> {
     const capability = getWebAudioCapability();
-    const loopbackEnabled = isLoopbackSystemAudioEnabled(settings.capture);
     if (!capability.hasGetUserMedia || !capability.hasEnumerateDevices) {
       return { ok: false, detail: "Web Audio capture is unavailable in this runtime." };
-    }
-
-    if (loopbackEnabled && !settings.capture.systemDevice.trim()) {
-      return { ok: false, detail: "Additional source is enabled, but no second input device is selected." };
     }
 
     const fs = requireNodeModule<{
@@ -237,16 +230,8 @@ export class DiagnosticsService {
         fullAudioPath: audioPath,
         segmentsDir,
         segmentDurationSeconds: Math.max(1, settings.diagnostics.quickTestDurationSeconds),
-        microphoneDevice: settings.capture.microphoneDevice,
-        additionalSources:
-          loopbackEnabled && settings.capture.systemDevice.trim()
-            ? [
-                {
-                  deviceId: settings.capture.systemDevice.trim(),
-                  label: settings.capture.systemLabel.trim() || "Additional source",
-                },
-              ]
-            : [],
+        microphoneDevice: settings.capture.microphone.deviceId,
+        additionalSources: settings.capture.additionalSources,
         onSegmentReady: () => {},
       });
 
@@ -256,7 +241,7 @@ export class DiagnosticsService {
       await adapter.stop();
 
       if (settings.transcription.whisperCliPath.trim() && settings.transcription.modelPath.trim() && fs.existsSync(audioPath)) {
-        const transcriptionAdapter = new WhisperTranscriptionAdapter(settings.transcription, settings.capture.ffmpegPath);
+        const transcriptionAdapter = new WhisperTranscriptionAdapter(settings.transcription);
         const transcript = await transcriptionAdapter.transcribeFile(audioPath);
         if (!transcript.trim()) {
           return { ok: false, detail: "Quick test recorded audio, but whisper.cpp returned an empty transcript." };
@@ -322,40 +307,47 @@ function getWhisperModelSeverity(
 function getWhisperModelDetail(
   modelPath: string,
   fs: {
-    existsSync: (path: string) => boolean;
+    accessSync: (path: string, mode?: number) => void;
+    constants: { R_OK: number };
     statSync: (path: string) => { size: number };
   }
 ): string {
   if (!modelPath) return "Whisper model path is empty.";
   if (isLikelyTestWhisperModelPath(modelPath)) {
-    return `Configured path: ${modelPath} (this is a whisper.cpp test model without real weights).`;
+    return "Configured model is a for-tests whisper.cpp CI file, not a real speech model.";
   }
   try {
-    if (fs.existsSync(modelPath)) {
-      const sizeMb = (fs.statSync(modelPath).size / (1024 * 1024)).toFixed(1);
-      if (fs.statSync(modelPath).size < 10 * 1024 * 1024) {
-        return `Configured path: ${modelPath} (${sizeMb} MiB, suspiciously small for a real Whisper model).`;
-      }
-      return `Configured path: ${modelPath} (${sizeMb} MiB).`;
+    fs.accessSync(modelPath, fs.constants.R_OK);
+    const sizeBytes = fs.statSync(modelPath).size;
+    if (sizeBytes < 10 * 1024 * 1024) {
+      return `Configured model looks too small (${Math.round(sizeBytes / 1024)} KB).`;
     }
-  } catch {}
-  return `Configured path: ${modelPath}`;
+    return `Configured model: ${modelPath}`;
+  } catch {
+    return `Configured model is unreadable: ${modelPath}`;
+  }
 }
 
 function getWhisperModelRemediation(
   modelPath: string,
   fs: {
-    existsSync: (path: string) => boolean;
+    accessSync: (path: string, mode?: number) => void;
+    constants: { R_OK: number };
     statSync: (path: string) => { size: number };
   }
 ): string {
+  if (!modelPath) return "Download a real ggml model such as ggml-small.bin and set Model path.";
   if (isLikelyTestWhisperModelPath(modelPath)) {
-    return "Download a real ggml model such as ggml-base.bin or ggml-small.bin. Do not use files prefixed with for-tests-.";
+    return "Replace the for-tests model with a real ggml model such as ggml-small.bin.";
   }
   try {
-    if (modelPath && fs.existsSync(modelPath) && fs.statSync(modelPath).size < 10 * 1024 * 1024) {
-      return "Select a real ggml Whisper model. Valid models are typically tens or hundreds of MiB, not a few KiB or MiB.";
+    fs.accessSync(modelPath, fs.constants.R_OK);
+    const sizeBytes = fs.statSync(modelPath).size;
+    if (sizeBytes < 10 * 1024 * 1024) {
+      return "Download a real ggml model and point Model path to it.";
     }
-  } catch {}
-  return "Download or select a readable ggml model file.";
+    return "Model path looks healthy.";
+  } catch {
+    return "Fix the model path or download a real ggml model.";
+  }
 }

@@ -2,10 +2,7 @@ import type { TranscriptionSettings } from "../../domain/settings";
 import { requireNodeModule } from "../node";
 
 export class WhisperTranscriptionAdapter {
-  constructor(
-    private readonly settings: TranscriptionSettings,
-    private readonly ffmpegPath?: string
-  ) {}
+  constructor(private readonly settings: TranscriptionSettings) {}
 
   async transcribeFile(audioPath: string): Promise<string> {
     if (!this.settings.whisperCliPath.trim()) {
@@ -22,7 +19,7 @@ export class WhisperTranscriptionAdapter {
     }>("fs");
     const outputPrefix = audioPath.replace(/\.[^.]+$/i, "");
     const outputTextPath = `${outputPrefix}.txt`;
-    const preparedAudioPath = await this.prepareAudioForWhisper(audioPath, outputPrefix);
+    const preparedAudioPath = audioPath;
 
     try {
       let transcript = await this.runWhisper(preparedAudioPath, outputPrefix, outputTextPath, false);
@@ -42,31 +39,6 @@ export class WhisperTranscriptionAdapter {
         fs.unlinkSync(outputTextPath);
       } catch {}
     }
-  }
-
-  private async prepareAudioForWhisper(audioPath: string, outputPrefix: string): Promise<string> {
-    const extension = audioPath.split(".").pop()?.toLowerCase();
-    if (extension === "wav" || !this.ffmpegPath?.trim()) {
-      return audioPath;
-    }
-
-    const wavPath = `${outputPrefix}.whisper.wav`;
-    await this.spawnProcess(this.ffmpegPath, [
-      "-y",
-      "-i",
-      audioPath,
-      "-vn",
-      "-af",
-      "highpass=f=80,lowpass=f=7000,dynaudnorm=framelen=250:gausssize=31",
-      "-ar",
-      "16000",
-      "-ac",
-      "1",
-      "-c:a",
-      "pcm_s16le",
-      wavPath,
-    ], requireNodeModule<{ dirname: (path: string) => string }>("path").dirname(audioPath), "FFmpeg prepare");
-    return wavPath;
   }
 
   private async runWhisper(

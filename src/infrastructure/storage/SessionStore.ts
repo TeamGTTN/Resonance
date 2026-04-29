@@ -1,11 +1,12 @@
 import type { App } from "obsidian";
 import { getSelectedSummaryModel } from "../../domain/providers";
+import { type PluginSettings, type CaptureSourceSelection } from "../../domain/settings";
 import {
-  type CaptureEngine,
-  type PluginSettingsV2,
-  type SystemAudioMode,
-} from "../../domain/settings";
-import type { DiagnosticsSummary, RecordingSessionManifest } from "../../domain/session";
+  SUPPORTED_SESSION_SCHEMA_VERSION,
+  isSupportedSessionManifest,
+  type DiagnosticsSummary,
+  type RecordingSessionManifest,
+} from "../../domain/session";
 import type { ScenarioTemplate } from "../../domain/scenarios";
 import { getVaultBasePath, getVaultConfigDir, requireNodeModule } from "../node";
 
@@ -25,7 +26,6 @@ interface FsModule {
 
 interface PathModule {
   join: (...parts: string[]) => string;
-  extname: (path: string) => string;
 }
 
 export class SessionStore {
@@ -40,7 +40,7 @@ export class SessionStore {
 
   async createSession(
     scenario: ScenarioTemplate,
-    settings: PluginSettingsV2,
+    settings: PluginSettings,
     diagnosticsSummary: DiagnosticsSummary
   ): Promise<RecordingSessionManifest> {
     const fs = requireNodeModule<FsModule>("fs");
@@ -56,9 +56,7 @@ export class SessionStore {
     const diagnosticsLogPath = path.join(rootDir, "diagnostics.log");
     const transcriptTextPath = path.join(transcriptDir, "live-transcript.txt");
     const summaryMarkdownPath = path.join(summaryDir, "summary.md");
-    const captureEngine: CaptureEngine = "web";
-    const fullAudioFilename = "recording.wav";
-    const fullAudioPath = path.join(audioDir, fullAudioFilename);
+    const fullAudioPath = path.join(audioDir, "recording.wav");
 
     for (const dir of [this.getSessionsRootDir(), rootDir, audioDir, segmentsDir, transcriptDir, summaryDir]) {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -67,16 +65,20 @@ export class SessionStore {
     fs.writeFileSync(summaryMarkdownPath, "", { encoding: "utf8" });
     fs.writeFileSync(diagnosticsLogPath, "", { encoding: "utf8" });
 
+    const captureSources = {
+      microphone: cloneSource(settings.capture.microphone),
+      additionalSources: settings.capture.additionalSources.map(cloneSource),
+    };
+
     const manifest: RecordingSessionManifest = {
-      schemaVersion: 3,
+      schemaVersion: SUPPORTED_SESSION_SCHEMA_VERSION,
       sessionId,
       createdAt,
       updatedAt: createdAt,
       scenarioKey: scenario.key,
       scenarioLabel: scenario.label,
-      captureEngine,
-      systemAudioMode: settings.capture.systemAudioMode,
-      captureMode: deriveCaptureMode(settings.capture.systemAudioMode),
+      captureMode: captureSources.additionalSources.length > 0 ? "multiple-input" : "microphone",
+      captureSources,
       status: "preflight",
       paths: {
         rootDir,
@@ -121,6 +123,7 @@ export class SessionStore {
   async writeManifest(manifest: RecordingSessionManifest): Promise<void> {
     const fs = requireNodeModule<FsModule>("fs");
     const now = new Date().toISOString();
+    manifest.schemaVersion = SUPPORTED_SESSION_SCHEMA_VERSION;
     manifest.updatedAt = now;
     manifest.runtime.lastActivityAt = now;
     if ((manifest.status === "done" || manifest.status === "failed") && !manifest.runtime.finishedAt) {
@@ -170,7 +173,8 @@ export class SessionStore {
       try {
         if (!fs.statSync(dir).isDirectory()) continue;
         const manifestPath = path.join(dir, "session.json");
-        const raw = JSON.parse(String(fs.readFileSync(manifestPath, { encoding: "utf8" }))) as RecordingSessionManifest;
+        const raw = JSON.parse(String(fs.readFileSync(manifestPath, { encoding: "utf8" })));
+        if (!isSupportedSessionManifest(raw)) continue;
         const manifest = this.normalizeManifest(raw);
         if (manifest.status !== "idle" && manifest.status !== "preflight") {
           manifests.push(manifest);
@@ -187,7 +191,8 @@ export class SessionStore {
     try {
       const manifestPath = path.join(rootDir, "session.json");
       if (!fs.existsSync(manifestPath)) return null;
-      const raw = JSON.parse(String(fs.readFileSync(manifestPath, { encoding: "utf8" }))) as RecordingSessionManifest;
+      const raw = JSON.parse(String(fs.readFileSync(manifestPath, { encoding: "utf8" })));
+      if (!isSupportedSessionManifest(raw)) return null;
       return this.normalizeManifest(raw);
     } catch {
       return null;
@@ -247,13 +252,15 @@ export class SessionStore {
 
   private normalizeManifest(manifest: RecordingSessionManifest): RecordingSessionManifest {
     const fallbackTimestamp = manifest.updatedAt || manifest.createdAt || new Date().toISOString();
-    const captureEngine = manifest.captureEngine ?? inferLegacyCaptureEngine(manifest);
-    const systemAudioMode = manifest.systemAudioMode ?? inferLegacySystemAudioMode(manifest);
     const normalized: RecordingSessionManifest = {
       ...manifest,
-      schemaVersion: 3,
-      captureEngine,
-      systemAudioMode,
+      schemaVersion: SUPPORTED_SESSION_SCHEMA_VERSION,
+      captureSources: {
+        microphone: cloneSource(manifest.captureSources?.microphone),
+        additionalSources: Array.isArray(manifest.captureSources?.additionalSources)
+          ? manifest.captureSources.additionalSources.map(cloneSource)
+          : [],
+      },
       notes: manifest.notes ?? {},
       diagnosticsSummary: manifest.diagnosticsSummary ?? {
         checkedAt: fallbackTimestamp,
@@ -313,26 +320,9 @@ export class SessionStore {
   }
 }
 
-function inferLegacyCaptureEngine(manifest: RecordingSessionManifest): CaptureEngine {
-  return manifest.paths.fullAudioPath.toLowerCase().endsWith(".wav") ? "web" : "ffmpeg";
-}
-
-function inferLegacySystemAudioMode(manifest: RecordingSessionManifest): SystemAudioMode {
-  if (manifest.captureMode === "microphone+system") {
-    return "loopback";
-  }
-  if (manifest.captureMode === "system") {
-    return "share";
-  }
-  return "off";
-}
-
-function deriveCaptureMode(systemAudioMode: SystemAudioMode): RecordingSessionManifest["captureMode"] {
-  if (systemAudioMode === "share") {
-    return "system";
-  }
-  if (systemAudioMode === "loopback") {
-    return "microphone+system";
-  }
-  return "microphone";
+function cloneSource(source: Partial<CaptureSourceSelection> | undefined): CaptureSourceSelection {
+  return {
+    deviceId: typeof source?.deviceId === "string" ? source.deviceId : "",
+    label: typeof source?.label === "string" ? source.label : "",
+  };
 }

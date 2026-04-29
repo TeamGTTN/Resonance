@@ -100,20 +100,58 @@ test("WebCaptureAdapter opens a second Web Audio input when an additional source
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-test("WebCaptureAdapter fails clearly when the additional source is missing", async () => {
+test("WebCaptureAdapter skips missing additional sources and continues recording", async () => {
   installFakeWebAudioEnvironment();
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "resonance-web-missing-source-"));
+  const segmentsDir = path.join(tmpDir, "segments");
+  fs.mkdirSync(segmentsDir, { recursive: true });
+  const logs: string[] = [];
+
   const adapter = new WebCaptureAdapter();
-  await assert.rejects(
-    () =>
-      adapter.start({
-        fullAudioPath: "/tmp/ignored.wav",
-        segmentsDir: "/tmp",
-        segmentDurationSeconds: 1,
-        additionalSources: [{ deviceId: "missing-loopback", label: "BlackHole 2ch" }],
-        onSegmentReady: () => {},
-      }),
-    /additional audio source/i
-  );
+  await adapter.start({
+    fullAudioPath: path.join(tmpDir, "recording.wav"),
+    segmentsDir,
+    segmentDurationSeconds: 1,
+    additionalSources: [{ deviceId: "missing-loopback", label: "BlackHole 2ch" }],
+    onSegmentReady: () => {},
+    onLog: (line) => logs.push(line),
+  });
+
+  assert.equal(requestedConstraints.length, 1);
+  assert.ok(logs.some((line) => line.includes("unavailable")));
+
+  await adapter.stop();
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test("WebCaptureAdapter skips duplicated additional sources", async () => {
+  installFakeWebAudioEnvironment();
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "resonance-web-duplicate-source-"));
+  const segmentsDir = path.join(tmpDir, "segments");
+  fs.mkdirSync(segmentsDir, { recursive: true });
+  const logs: string[] = [];
+
+  const adapter = new WebCaptureAdapter();
+  await adapter.start({
+    fullAudioPath: path.join(tmpDir, "recording.wav"),
+    segmentsDir,
+    segmentDurationSeconds: 1,
+    microphoneDevice: "mic-1",
+    additionalSources: [
+      { deviceId: "loopback-1", label: "BlackHole 2ch" },
+      { deviceId: "loopback-1", label: "BlackHole 2ch" },
+      { deviceId: "mic-1", label: "USB Microphone" },
+    ],
+    onSegmentReady: () => {},
+    onLog: (line) => logs.push(line),
+  });
+
+  assert.equal(requestedConstraints.length, 2);
+  assert.ok(logs.some((line) => line.includes("duplicated")));
+  assert.ok(logs.some((line) => line.includes("matches the selected microphone")));
+
+  await adapter.stop();
+  fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 function installDesktopRuntime(): void {

@@ -1,4 +1,8 @@
-import { resolvePreferredWebAudioInput, resolveWebAudioInputById } from "../system/webAudio";
+import {
+  resolvePreferredWebAudioInput,
+  resolveWebAudioInputById,
+  type WebAudioInputDevice,
+} from "../system/webAudio";
 import { requireNodeModule } from "../node";
 import { StreamingWavWriter, writeWavFile } from "./wavWriter";
 
@@ -68,28 +72,43 @@ export class WebCaptureAdapter {
     }
 
     const additionalSources = options.additionalSources ?? [];
-    const resolvedAdditionalSources = await Promise.all(
-      additionalSources.map(async (source) => {
-        const resolved = await resolveWebAudioInputById(source.deviceId);
-        if (!resolved) {
-          throw new Error(
-            source.label?.trim()
-              ? `Additional audio source "${source.label}" is unavailable. Refresh devices or turn it off.`
-              : "The selected additional audio source is unavailable. Refresh devices or turn it off."
-          );
-        }
-        return {
-          requested: source,
-          resolved,
-        };
-      })
-    );
-
-    if (
-      requestedDeviceId &&
-      resolvedAdditionalSources.some(({ resolved }) => resolved.deviceId === requestedDeviceId)
-    ) {
-      throw new Error("The additional audio source must be different from the microphone.");
+    const resolvedAdditionalSources: Array<{
+      requested: WebCaptureInputSource;
+      resolved: WebAudioInputDevice;
+    }> = [];
+    const seenAdditionalIds = new Set<string>();
+    for (const source of additionalSources) {
+      if (!source.deviceId.trim()) continue;
+      if (requestedDeviceId && source.deviceId === requestedDeviceId) {
+        options.onLog?.(
+          source.label?.trim()
+            ? `Web Audio skip: additional source "${source.label}" matches the selected microphone.`
+            : "Web Audio skip: additional source matches the selected microphone."
+        );
+        continue;
+      }
+      if (seenAdditionalIds.has(source.deviceId)) {
+        options.onLog?.(
+          source.label?.trim()
+            ? `Web Audio skip: additional source "${source.label}" is duplicated.`
+            : "Web Audio skip: duplicated additional source."
+        );
+        continue;
+      }
+      const resolved = await resolveWebAudioInputById(source.deviceId);
+      if (!resolved) {
+        options.onLog?.(
+          source.label?.trim()
+            ? `Web Audio skip: additional source "${source.label}" is unavailable.`
+            : "Web Audio skip: selected additional source is unavailable."
+        );
+        continue;
+      }
+      seenAdditionalIds.add(source.deviceId);
+      resolvedAdditionalSources.push({
+        requested: source,
+        resolved,
+      });
     }
 
     try {

@@ -1,29 +1,14 @@
 import { getSelectedSummaryModel, type SummaryProviderId } from "./providers";
 
-export type CaptureBackend = "auto" | "avfoundation" | "dshow" | "pulse" | "alsa";
-export type CaptureProfile = "transcription" | "balanced" | "natural" | "custom";
-export type CaptureEngine = "web" | "ffmpeg";
-export type SystemAudioMode = "off" | "loopback" | "share";
-export type CaptureRuntimeKind = "web-mic" | "web-multi-input";
+export interface CaptureSourceSelection {
+  deviceId: string;
+  label: string;
+}
 
 export interface CaptureSettings {
-  captureEngine: CaptureEngine;
-  systemAudioMode: SystemAudioMode;
-  ffmpegPath: string;
-  backend: CaptureBackend;
-  microphoneDevice: string;
-  microphoneLabel: string;
-  systemDevice: string;
-  systemLabel: string;
-  sampleRateHz: number;
-  channels: 1 | 2;
-  bitrateKbps: number;
+  microphone: CaptureSourceSelection;
+  additionalSources: CaptureSourceSelection[];
   segmentDurationSeconds: number;
-  captureProfile: CaptureProfile;
-  micGainDb: number;
-  systemGainDb: number;
-  noiseSuppression: boolean;
-  limiter: boolean;
 }
 
 export interface TranscriptionSettings {
@@ -66,8 +51,8 @@ export interface DiagnosticsSettings {
   quickTestDurationSeconds: number;
 }
 
-export interface PluginSettingsV2 {
-  version: 2;
+export interface PluginSettings {
+  version: 3;
   capture: CaptureSettings;
   transcription: TranscriptionSettings;
   summary: SummarySettings;
@@ -76,26 +61,15 @@ export interface PluginSettingsV2 {
   diagnostics: DiagnosticsSettings;
 }
 
-export const DEFAULT_SETTINGS_V2: PluginSettingsV2 = {
-  version: 2,
+export const DEFAULT_SETTINGS: PluginSettings = {
+  version: 3,
   capture: {
-    captureEngine: "web",
-    systemAudioMode: "off",
-    ffmpegPath: "",
-    backend: "auto",
-    microphoneDevice: "",
-    microphoneLabel: "",
-    systemDevice: "",
-    systemLabel: "",
-    sampleRateHz: 48000,
-    channels: 1,
-    bitrateKbps: 160,
+    microphone: {
+      deviceId: "",
+      label: "",
+    },
+    additionalSources: [],
     segmentDurationSeconds: 20,
-    captureProfile: "balanced",
-    micGainDb: 0,
-    systemGainDb: 0,
-    noiseSuppression: true,
-    limiter: true,
   },
   transcription: {
     whisperRepoPath: "",
@@ -140,12 +114,6 @@ function clampInteger(value: unknown, fallback: number, min: number, max: number
   return Math.max(min, Math.min(max, Math.floor(parsed)));
 }
 
-function clampFloat(value: unknown, fallback: number, min: number, max: number): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.round(Math.max(min, Math.min(max, parsed)) * 10) / 10;
-}
-
 function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
@@ -154,61 +122,46 @@ function asBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
-function normalizeCaptureSettings(raw: unknown): CaptureSettings {
-  const input = (raw ?? {}) as Partial<CaptureSettings>;
-  const backend = input.backend;
-  const profile = input.captureProfile;
-  const captureEngine = inferCaptureEngine(input);
-  const systemAudioMode = inferSystemAudioMode(input);
+function normalizeCaptureSource(raw: unknown, allowDefault = true): CaptureSourceSelection {
+  const input = (raw ?? {}) as Partial<CaptureSourceSelection>;
+  const rawDeviceId = asString(input.deviceId).trim();
+  const deviceId = allowDefault && rawDeviceId === "default" ? "" : rawDeviceId;
   return {
-    captureEngine,
-    systemAudioMode,
-    ffmpegPath: asString(input.ffmpegPath),
-    backend:
-      backend === "avfoundation" || backend === "dshow" || backend === "pulse" || backend === "alsa" || backend === "auto"
-        ? backend
-        : DEFAULT_SETTINGS_V2.capture.backend,
-    microphoneDevice: asString(input.microphoneDevice),
-    microphoneLabel: asString(input.microphoneLabel),
-    systemDevice: asString(input.systemDevice),
-    systemLabel: asString(input.systemLabel),
-    sampleRateHz: clampInteger(input.sampleRateHz, DEFAULT_SETTINGS_V2.capture.sampleRateHz, 8_000, 192_000),
-    channels: clampInteger(input.channels, DEFAULT_SETTINGS_V2.capture.channels, 1, 2) === 1 ? 1 : 2,
-    bitrateKbps: clampInteger(input.bitrateKbps, DEFAULT_SETTINGS_V2.capture.bitrateKbps, 64, 320),
-    segmentDurationSeconds: clampInteger(input.segmentDurationSeconds, DEFAULT_SETTINGS_V2.capture.segmentDurationSeconds, 5, 300),
-    captureProfile:
-      profile === "transcription" || profile === "balanced" || profile === "natural" || profile === "custom"
-        ? profile
-        : DEFAULT_SETTINGS_V2.capture.captureProfile,
-    micGainDb: clampFloat(input.micGainDb, DEFAULT_SETTINGS_V2.capture.micGainDb, -12, 12),
-    systemGainDb: clampFloat(input.systemGainDb, DEFAULT_SETTINGS_V2.capture.systemGainDb, -12, 12),
-    noiseSuppression: asBoolean(input.noiseSuppression, DEFAULT_SETTINGS_V2.capture.noiseSuppression),
-    limiter: asBoolean(input.limiter, DEFAULT_SETTINGS_V2.capture.limiter),
+    deviceId,
+    label: asString(input.label).trim(),
   };
 }
 
-function inferCaptureEngine(input: Partial<CaptureSettings>): CaptureEngine {
-  if (input.captureEngine === "web" || input.captureEngine === "ffmpeg") {
-    return input.captureEngine;
+function normalizeAdditionalSources(raw: unknown, microphoneDeviceId: string): CaptureSourceSelection[] {
+  const rawSources = Array.isArray(raw) ? raw : [];
+  const seen = new Set<string>();
+  const normalized: CaptureSourceSelection[] = [];
+
+  for (const entry of rawSources) {
+    const source = normalizeCaptureSource(entry, false);
+    if (!source.deviceId || source.deviceId === microphoneDeviceId || seen.has(source.deviceId)) continue;
+    seen.add(source.deviceId);
+    normalized.push(source);
   }
 
-  return DEFAULT_SETTINGS_V2.capture.captureEngine;
+  return normalized;
 }
 
-function inferSystemAudioMode(input: Partial<CaptureSettings>): SystemAudioMode {
-  if (input.systemAudioMode === "off" || input.systemAudioMode === "loopback") {
-    return input.systemAudioMode;
-  }
+function normalizeCaptureSettings(raw: unknown): CaptureSettings {
+  const input = (raw ?? {}) as Record<string, unknown>;
+  const microphone = normalizeCaptureSource(input.microphone, true);
+  const additionalSources = normalizeAdditionalSources(input.additionalSources, microphone.deviceId);
 
-  if (input.systemAudioMode === "share") {
-    return "off";
-  }
-
-  if (asString(input.systemDevice).trim() || asString(input.systemLabel).trim()) {
-    return "loopback";
-  }
-
-  return DEFAULT_SETTINGS_V2.capture.systemAudioMode;
+  return {
+    microphone,
+    additionalSources,
+    segmentDurationSeconds: clampInteger(
+      input.segmentDurationSeconds,
+      DEFAULT_SETTINGS.capture.segmentDurationSeconds,
+      5,
+      300
+    ),
+  };
 }
 
 function normalizeTranscriptionSettings(raw: unknown): TranscriptionSettings {
@@ -221,15 +174,15 @@ function normalizeTranscriptionSettings(raw: unknown): TranscriptionSettings {
     modelPreset:
       preset === "base" || preset === "small" || preset === "medium" || preset === "large"
         ? preset
-        : DEFAULT_SETTINGS_V2.transcription.modelPreset,
-    language: asString(input.language, DEFAULT_SETTINGS_V2.transcription.language),
-    beamSize: clampInteger(input.beamSize, DEFAULT_SETTINGS_V2.transcription.beamSize, 1, 10),
+        : DEFAULT_SETTINGS.transcription.modelPreset,
+    language: asString(input.language, DEFAULT_SETTINGS.transcription.language),
+    beamSize: clampInteger(input.beamSize, DEFAULT_SETTINGS.transcription.beamSize, 1, 10),
     entropyThreshold: Number.isFinite(Number(input.entropyThreshold))
       ? Number(input.entropyThreshold)
-      : DEFAULT_SETTINGS_V2.transcription.entropyThreshold,
+      : DEFAULT_SETTINGS.transcription.entropyThreshold,
     logprobThreshold: Number.isFinite(Number(input.logprobThreshold))
       ? Number(input.logprobThreshold)
-      : DEFAULT_SETTINGS_V2.transcription.logprobThreshold,
+      : DEFAULT_SETTINGS.transcription.logprobThreshold,
   };
 }
 
@@ -240,25 +193,28 @@ function normalizeSummarySettings(raw: unknown): SummarySettings {
     provider:
       provider === "ollama" || provider === "gemini" || provider === "openai" || provider === "anthropic"
         ? provider
-        : DEFAULT_SETTINGS_V2.summary.provider,
-    ollamaEndpoint: asString(input.ollamaEndpoint, DEFAULT_SETTINGS_V2.summary.ollamaEndpoint),
-    ollamaModel: asString(input.ollamaModel, DEFAULT_SETTINGS_V2.summary.ollamaModel),
+        : DEFAULT_SETTINGS.summary.provider,
+    ollamaEndpoint: asString(input.ollamaEndpoint, DEFAULT_SETTINGS.summary.ollamaEndpoint),
+    ollamaModel: asString(input.ollamaModel, DEFAULT_SETTINGS.summary.ollamaModel),
     geminiApiKey: asString(input.geminiApiKey),
-    geminiModel: asString(input.geminiModel, DEFAULT_SETTINGS_V2.summary.geminiModel),
+    geminiModel: asString(input.geminiModel, DEFAULT_SETTINGS.summary.geminiModel),
     openaiApiKey: asString(input.openaiApiKey),
-    openaiModel: asString(input.openaiModel, DEFAULT_SETTINGS_V2.summary.openaiModel),
+    openaiModel: asString(input.openaiModel, DEFAULT_SETTINGS.summary.openaiModel),
     anthropicApiKey: asString(input.anthropicApiKey),
-    anthropicModel: asString(input.anthropicModel, DEFAULT_SETTINGS_V2.summary.anthropicModel),
+    anthropicModel: asString(input.anthropicModel, DEFAULT_SETTINGS.summary.anthropicModel),
   };
 }
 
 function normalizeOutputSettings(raw: unknown): OutputSettings {
   const input = (raw ?? {}) as Partial<OutputSettings>;
   return {
-    vaultFolder: asString(input.vaultFolder, DEFAULT_SETTINGS_V2.output.vaultFolder),
-    storeLiveTranscriptInVault: asBoolean(input.storeLiveTranscriptInVault, DEFAULT_SETTINGS_V2.output.storeLiveTranscriptInVault),
-    openSummaryAfterCreate: asBoolean(input.openSummaryAfterCreate, DEFAULT_SETTINGS_V2.output.openSummaryAfterCreate),
-    maxSessionsKept: clampInteger(input.maxSessionsKept, DEFAULT_SETTINGS_V2.output.maxSessionsKept, 0, 500),
+    vaultFolder: asString(input.vaultFolder, DEFAULT_SETTINGS.output.vaultFolder),
+    storeLiveTranscriptInVault: asBoolean(
+      input.storeLiveTranscriptInVault,
+      DEFAULT_SETTINGS.output.storeLiveTranscriptInVault
+    ),
+    openSummaryAfterCreate: asBoolean(input.openSummaryAfterCreate, DEFAULT_SETTINGS.output.openSummaryAfterCreate),
+    maxSessionsKept: clampInteger(input.maxSessionsKept, DEFAULT_SETTINGS.output.maxSessionsKept, 0, 500),
   };
 }
 
@@ -266,8 +222,8 @@ function normalizeUiSettings(raw: unknown): UiSettings {
   const input = (raw ?? {}) as Partial<UiSettings>;
   return {
     lastScenarioKey: asString(input.lastScenarioKey) || undefined,
-    showSetupWizardOnStartup: asBoolean(input.showSetupWizardOnStartup, DEFAULT_SETTINGS_V2.ui.showSetupWizardOnStartup),
-    showDiagnosticsOnStartup: asBoolean(input.showDiagnosticsOnStartup, DEFAULT_SETTINGS_V2.ui.showDiagnosticsOnStartup),
+    showSetupWizardOnStartup: asBoolean(input.showSetupWizardOnStartup, DEFAULT_SETTINGS.ui.showSetupWizardOnStartup),
+    showDiagnosticsOnStartup: asBoolean(input.showDiagnosticsOnStartup, DEFAULT_SETTINGS.ui.showDiagnosticsOnStartup),
   };
 }
 
@@ -276,35 +232,24 @@ function normalizeDiagnosticsSettings(raw: unknown): DiagnosticsSettings {
   return {
     quickTestDurationSeconds: clampInteger(
       input.quickTestDurationSeconds,
-      DEFAULT_SETTINGS_V2.diagnostics.quickTestDurationSeconds,
+      DEFAULT_SETTINGS.diagnostics.quickTestDurationSeconds,
       1,
       10
     ),
   };
 }
 
-export function normalizeSettingsV2(raw: unknown): PluginSettingsV2 {
-  const input = (raw ?? {}) as Partial<PluginSettingsV2>;
-  const summary = normalizeSummarySettings(input.summary);
+export function normalizeSettings(raw: unknown): PluginSettings {
+  const input = (raw ?? {}) as Partial<PluginSettings>;
   return {
-    version: 2,
+    version: 3,
     capture: normalizeCaptureSettings(input.capture),
     transcription: normalizeTranscriptionSettings(input.transcription),
-    summary,
+    summary: normalizeSummarySettings(input.summary),
     output: normalizeOutputSettings(input.output),
     ui: normalizeUiSettings(input.ui),
     diagnostics: normalizeDiagnosticsSettings(input.diagnostics),
   };
-}
-
-export function resolveCaptureBackend(
-  backend: CaptureBackend,
-  platform: NodeJS.Platform = process.platform
-): "avfoundation" | "dshow" | "pulse" | "alsa" {
-  if (backend !== "auto") return backend;
-  if (platform === "darwin") return "avfoundation";
-  if (platform === "win32") return "dshow";
-  return "pulse";
 }
 
 export function getSelectedProviderApiKey(settings: SummarySettings): string {
@@ -328,9 +273,8 @@ export function isLikelyTestWhisperModelPath(modelPath: string): boolean {
   return basename.startsWith("for-tests-");
 }
 
-export function isCoreConfigured(settings: PluginSettingsV2): boolean {
+export function isCoreConfigured(settings: PluginSettings): boolean {
   const selectedModel = getSelectedSummaryModel(settings.summary);
-  if (settings.capture.systemAudioMode === "loopback" && !settings.capture.systemDevice.trim()) return false;
   if (!settings.transcription.whisperCliPath.trim()) return false;
   if (!settings.transcription.modelPath.trim()) return false;
   if (isLikelyTestWhisperModelPath(settings.transcription.modelPath)) return false;
@@ -340,17 +284,6 @@ export function isCoreConfigured(settings: PluginSettingsV2): boolean {
   return !!selectedModel.trim() && !!getSelectedProviderApiKey(settings.summary).trim();
 }
 
-export function isSystemAudioEnabled(capture: CaptureSettings): boolean {
-  return capture.systemAudioMode !== "off";
-}
-
-export function isLoopbackSystemAudioEnabled(capture: CaptureSettings): boolean {
-  return capture.systemAudioMode === "loopback";
-}
-
-export function resolveCaptureRuntime(capture: CaptureSettings): CaptureRuntimeKind {
-  if (capture.systemAudioMode === "loopback") {
-    return "web-multi-input";
-  }
-  return "web-mic";
+export function hasAdditionalCaptureSources(capture: CaptureSettings): boolean {
+  return capture.additionalSources.length > 0;
 }

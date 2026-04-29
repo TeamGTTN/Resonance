@@ -13,7 +13,7 @@ export interface DiagnosticCheck {
 export interface DiagnosticsReport {
   checkedAt: string;
   provider: SummaryProviderId;
-  backend: "web" | "avfoundation" | "dshow" | "pulse" | "alsa";
+  capture: "web-audio";
   checks: DiagnosticCheck[];
   blockingIssueIds: string[];
   warningIds: string[];

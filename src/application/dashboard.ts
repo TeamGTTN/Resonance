@@ -1,7 +1,6 @@
 import type { DashboardSnapshot, DiagnosticsGroups } from "../domain/dashboard";
 import type { DiagnosticsReport } from "../domain/diagnostics";
-import type { SessionListItem, SessionRuntimeSnapshot, RecordingSessionManifest, SessionHealthBadge } from "../domain/session";
-import type { SystemAudioMode } from "../domain/settings";
+import type { RecordingSessionManifest, SessionHealthBadge, SessionListItem, SessionRuntimeSnapshot } from "../domain/session";
 import { uiCopy } from "../ui/copy";
 
 export function groupDiagnosticsChecks(report?: DiagnosticsReport): DiagnosticsGroups {
@@ -24,15 +23,12 @@ export function deriveSessionHealthBadge(manifest: RecordingSessionManifest): Se
 }
 
 export function deriveSessionListItem(manifest: RecordingSessionManifest, audioSizeBytes: number): SessionListItem {
-  const captureEngine = manifest.captureEngine ?? "ffmpeg";
-  const systemAudioMode = manifest.systemAudioMode ?? inferSystemAudioMode(manifest);
   return {
     sessionId: manifest.sessionId,
     scenarioKey: manifest.scenarioKey,
     scenarioLabel: manifest.scenarioLabel,
-    captureEngine,
-    systemAudioMode,
-    sourceLabel: describeSessionSource(systemAudioMode),
+    captureMode: manifest.captureMode,
+    sourceLabel: describeSessionSource(manifest),
     createdAt: manifest.createdAt,
     updatedAt: manifest.updatedAt,
     lastActivityAt: manifest.runtime.lastActivityAt,
@@ -62,20 +58,11 @@ export function deriveSessionListItem(manifest: RecordingSessionManifest, audioS
   };
 }
 
-function describeSessionSource(systemAudioMode: SystemAudioMode): string {
-  if (systemAudioMode === "share") {
-    return "Shared system audio";
-  }
-  if (systemAudioMode === "loopback") {
-    return "Microphone + additional source";
-  }
-  return "Microphone";
-}
-
-function inferSystemAudioMode(manifest: RecordingSessionManifest): SystemAudioMode {
-  if (manifest.captureMode === "microphone+system") return "loopback";
-  if (manifest.captureMode === "system") return "share";
-  return "off";
+function describeSessionSource(manifest: RecordingSessionManifest): string {
+  const additionalCount = manifest.captureSources.additionalSources.length;
+  if (additionalCount <= 0) return "Microphone";
+  if (additionalCount === 1) return "Microphone + 1 extra source";
+  return `Microphone + ${additionalCount} extra sources`;
 }
 
 export function buildDashboardSnapshot(input: {
@@ -100,24 +87,24 @@ export function buildDashboardSnapshot(input: {
         disabled: false,
       }
     : isBusy
-    ? {
-        intent: "busy" as const,
-        label: uiCopy.status.busy,
-        disabled: true,
-        reason: uiCopy.dashboard.busyReason,
-      }
-    : isHealthy
-    ? {
-        intent: "start" as const,
-        label: uiCopy.actions.startSession,
-        disabled: false,
-      }
-    : {
-        intent: "blocked" as const,
-        label: uiCopy.status.blocked,
-        disabled: true,
-        reason: uiCopy.dashboard.blockedReason,
-      };
+      ? {
+          intent: "busy" as const,
+          label: uiCopy.status.busy,
+          disabled: true,
+          reason: uiCopy.dashboard.busyReason,
+        }
+      : isHealthy
+        ? {
+            intent: "start" as const,
+            label: uiCopy.actions.startSession,
+            disabled: false,
+          }
+        : {
+            intent: "blocked" as const,
+            label: uiCopy.status.blocked,
+            disabled: true,
+            reason: uiCopy.dashboard.blockedReason,
+          };
 
   return {
     generatedAt: new Date().toISOString(),

@@ -1,6 +1,6 @@
 import type { DiagnosticsReport } from "./diagnostics";
 import type { SummaryProviderId } from "./providers";
-import type { CaptureEngine, SystemAudioMode } from "./settings";
+import type { CaptureSourceSelection } from "./settings";
 
 export const SESSION_STATES = [
   "idle",
@@ -16,6 +16,8 @@ export const SESSION_STATES = [
 ] as const;
 
 export type SessionState = (typeof SESSION_STATES)[number];
+export type RecordingCaptureMode = "microphone" | "multiple-input";
+export const SUPPORTED_SESSION_SCHEMA_VERSION = 4 as const;
 
 export interface DiagnosticsSummary {
   checkedAt: string;
@@ -38,15 +40,17 @@ export interface RecordingSessionPaths {
 }
 
 export interface RecordingSessionManifest {
-  schemaVersion: 1 | 2 | 3;
+  schemaVersion: typeof SUPPORTED_SESSION_SCHEMA_VERSION;
   sessionId: string;
   createdAt: string;
   updatedAt: string;
   scenarioKey: string;
   scenarioLabel: string;
-  captureEngine?: CaptureEngine;
-  systemAudioMode?: SystemAudioMode;
-  captureMode: "microphone" | "microphone+system" | "system";
+  captureMode: RecordingCaptureMode;
+  captureSources: {
+    microphone: CaptureSourceSelection;
+    additionalSources: CaptureSourceSelection[];
+  };
   status: SessionState;
   paths: RecordingSessionPaths;
   providerInfo: {
@@ -99,8 +103,7 @@ export interface SessionListItem {
   sessionId: string;
   scenarioKey: string;
   scenarioLabel: string;
-  captureEngine: CaptureEngine;
-  systemAudioMode: SystemAudioMode;
+  captureMode: RecordingCaptureMode;
   sourceLabel: string;
   createdAt: string;
   updatedAt: string;
@@ -137,4 +140,12 @@ export function buildDiagnosticsSummary(report: DiagnosticsReport): DiagnosticsS
     warningIds: report.warningIds,
     summary: report.summary,
   };
+}
+
+export function isSupportedSessionManifest(manifest: unknown): manifest is RecordingSessionManifest {
+  return Boolean(
+    manifest &&
+      typeof manifest === "object" &&
+      (manifest as { schemaVersion?: unknown }).schemaVersion === SUPPORTED_SESSION_SCHEMA_VERSION
+  );
 }

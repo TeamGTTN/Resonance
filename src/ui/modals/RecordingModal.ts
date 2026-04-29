@@ -1,7 +1,7 @@
 import { App, Modal, Notice } from "obsidian";
 import type { SessionController } from "../../application/SessionController";
 import { DEFAULT_SCENARIO_KEY, SCENARIOS, getScenario, type ScenarioTemplate } from "../../domain/scenarios";
-import { isCoreConfigured, type PluginSettingsV2 } from "../../domain/settings";
+import { isCoreConfigured, type PluginSettings } from "../../domain/settings";
 import type { SessionRuntimeSnapshot, SessionState } from "../../domain/session";
 import { openPluginSettings } from "../../infrastructure/obsidianDesktop";
 import { formatDuration } from "../../utils/format";
@@ -11,7 +11,7 @@ import { uiCopy } from "../copy";
 interface RecordingModalOptions {
   pluginId: string;
   controller: SessionController;
-  getSettings: () => PluginSettingsV2;
+  getSettings: () => PluginSettings;
   onClosed?: () => void;
 }
 

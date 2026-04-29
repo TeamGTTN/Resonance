@@ -19,25 +19,12 @@ export interface WebAudioCapability {
   hasEnumerateDevices: boolean;
 }
 
-export interface WebShareAudioCapability {
-  supported: boolean;
-  hasGetDisplayMedia: boolean;
-}
-
 export function getWebAudioCapability(): WebAudioCapability {
   const mediaDevices = globalThis.navigator?.mediaDevices;
   return {
     supported: Boolean(mediaDevices),
     hasGetUserMedia: typeof mediaDevices?.getUserMedia === "function",
     hasEnumerateDevices: typeof mediaDevices?.enumerateDevices === "function",
-  };
-}
-
-export function getWebShareAudioCapability(): WebShareAudioCapability {
-  const mediaDevices = globalThis.navigator?.mediaDevices;
-  return {
-    supported: Boolean(mediaDevices),
-    hasGetDisplayMedia: typeof mediaDevices?.getDisplayMedia === "function",
   };
 }
 

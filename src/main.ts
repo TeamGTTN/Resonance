@@ -1,7 +1,7 @@
 import { Notice, Plugin } from "obsidian";
 import { SessionController } from "./application/SessionController";
 import { DEFAULT_SCENARIO_KEY } from "./domain/scenarios";
-import { isCoreConfigured, normalizeSettingsV2, type PluginSettingsV2 } from "./domain/settings";
+import { isCoreConfigured, normalizeSettings, type PluginSettings } from "./domain/settings";
 import { setElementVisibility, openPluginSettings } from "./infrastructure/obsidianDesktop";
 import { formatDuration } from "./utils/format";
 import { uiCopy } from "./ui/copy";
@@ -9,7 +9,7 @@ import { ResonanceNextSettingTab, setPreferredSettingsTab } from "./ui/SettingsT
 import { RecordingModal } from "./ui/modals/RecordingModal";
 
 export default class ResonanceNextPlugin extends Plugin {
-  settings!: PluginSettingsV2;
+  settings!: PluginSettings;
   private controller!: SessionController;
   private controlRibbonEl!: HTMLElement;
   private libraryRibbonEl!: HTMLElement;
@@ -192,11 +192,11 @@ export default class ResonanceNextPlugin extends Plugin {
   }
 
   private async loadSettings() {
-    this.settings = normalizeSettingsV2(await this.loadData());
+    this.settings = normalizeSettings(await this.loadData());
   }
 
-  private async updateSettings(updater: (current: PluginSettingsV2) => PluginSettingsV2) {
-    this.settings = normalizeSettingsV2(updater(this.settings));
+  private async updateSettings(updater: (current: PluginSettings) => PluginSettings) {
+    this.settings = normalizeSettings(updater(this.settings));
     await this.saveData(this.settings);
   }
 }
