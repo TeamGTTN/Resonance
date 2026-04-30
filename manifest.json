@@ -3,7 +3,7 @@
   "name": "Resonance",
   "version": "0.1.0",
   "minAppVersion": "1.5.0",
-  "description": "A local first AI Obsidian recorder with resilient live transcription, diagnostics, and session based notes.",
+  "description": "A local-first AI Obsidian recorder with live transcription, diagnostics, and session-based notes.",
   "author": "Michael Gorini",
   "authorUrl": "https://buymeacoffee.com/michaelgorini",
   "fundingUrl": "https://buymeacoffee.com/michaelgorini",

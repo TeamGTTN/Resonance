@@ -47,7 +47,7 @@ export const uiCopy = {
   },
   diagnostics: {
     title: "Diagnostics",
-    subtitle: "Health checks for the local-first recording pipeline.",
+    subtitle: "Check permissions, devices, whisper.cpp, and summary provider health.",
     blocking: "Blocking issues",
     warnings: "Warnings",
     healthy: "Healthy checks",
@@ -57,7 +57,7 @@ export const uiCopy = {
   },
   library: {
     title: "Session Library",
-    subtitle: "Review finished and failed sessions from manifest-backed metadata.",
+    subtitle: "Review saved sessions, notes, cleanup actions, and storage usage.",
     all: "All",
     done: "Done",
     failed: "Failed",
@@ -66,7 +66,7 @@ export const uiCopy = {
     deleteConfirmation: "Delete this session and its vault notes?",
   },
   settings: {
-    title: "Local recording, transcription, and summaries for Obsidian.",
+    title: "Local recordings, transcripts, and summaries inside Obsidian.",
   },
   notices: {
     sessionComplete: "Session completed.",

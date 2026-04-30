@@ -122,7 +122,7 @@ export class RecordingModal extends Modal {
     if (!coreConfigured) {
       const note = panel.createDiv({ cls: "rxn-inline-note is-warning" });
       note.createEl("strong", { text: "Setup incomplete" });
-      note.createEl("p", { text: "Finish Capture, Transcription, and Summary before starting a recording." });
+      note.createEl("p", { text: "Finish Capture, Transcription, and Summary setup before starting your first recording." });
     } else if (snapshot.state === "done") {
       const note = panel.createDiv({ cls: "rxn-inline-note is-healthy" });
       note.createEl("strong", { text: "Last session completed" });
@@ -153,7 +153,7 @@ export class RecordingModal extends Modal {
     this.createActionButton(actions, uiCopy.actions.openLiveTranscript, async () => {
       const opened = await this.options.controller.openActiveLiveTranscript();
       if (!opened) {
-        new Notice("Live transcript is not available yet.");
+        new Notice("The live transcript note appears after the first transcript chunk is committed.");
       }
     }, "rxn-btn-secondary", !this.options.controller.getActiveLiveTranscriptNotePath());
   }
@@ -173,7 +173,7 @@ export class RecordingModal extends Modal {
           ? "Recording is done. Resonance is writing the final note and session files."
           : snapshot.state === "transcribing_live"
           ? "Recording is active and live transcription is catching up."
-          : "Recording is active. Stop when you want to finalize the summary.",
+          : "Recording is active. Stop when you are ready to generate the final summary.",
       cls: "rxn-muted",
     });
 
@@ -210,7 +210,7 @@ export class RecordingModal extends Modal {
     this.createActionButton(actions, uiCopy.actions.openLiveTranscript, async () => {
       const opened = await this.options.controller.openActiveLiveTranscript();
       if (!opened) {
-        new Notice("Live transcript is not available yet.");
+        new Notice("The live transcript note appears after the first transcript chunk is committed.");
       }
     }, "rxn-btn-secondary", !this.options.controller.getActiveLiveTranscriptNotePath());
 

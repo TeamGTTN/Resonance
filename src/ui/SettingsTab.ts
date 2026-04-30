@@ -275,7 +275,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     const intro = this.createGuideSection(container, {
       badge: "Workspace",
       title: "Diagnostics",
-      intro: "Check what is blocking the local pipeline and fix it in the setup tabs.",
+      intro: "Check permissions, devices, and local dependencies before you record.",
     });
 
     const actions = intro.createDiv({ cls: "rxn-action-bar" });
@@ -323,7 +323,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     const preferences = this.createGuideSection(container, {
       badge: "Preferences",
       title: "Quick test and startup",
-      intro: "Use these to tune the smoke test and choose which tab opens first.",
+      intro: "Adjust the quick test length and choose which tab opens first.",
     });
 
     new Setting(preferences)
@@ -343,7 +343,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
 
     new Setting(preferences)
       .setName("Open setup on startup")
-      .setDesc("Open Capture on launch.")
+      .setDesc("Open Capture when Obsidian starts.")
       .addToggle((toggle) =>
         toggle.setValue(settings.ui.showSetupWizardOnStartup).onChange(async (value) => {
           await this.options.saveSettings((current) => ({
@@ -355,7 +355,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
 
     new Setting(preferences)
       .setName("Open diagnostics on startup")
-      .setDesc("Open Diagnostics on launch.")
+      .setDesc("Open Diagnostics when Obsidian starts.")
       .addToggle((toggle) =>
         toggle.setValue(settings.ui.showDiagnosticsOnStartup).onChange(async (value) => {
           await this.options.saveSettings((current) => ({
@@ -367,7 +367,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
 
     preferences.createEl("p", {
       cls: "rxn-muted",
-      text: "Session logs are available in Library with Preview diagnostics.",
+      text: "Session logs remain available in Library under Preview diagnostics.",
     });
   }
 
@@ -394,12 +394,12 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       cls: `rxn-status-pill is-${this.getWebPermissionTone(deviceSnapshot.permissionState)}`,
     });
     meta.createEl("span", {
-      text: deviceSnapshot.devices.length > 0 ? `${deviceSnapshot.devices.length} mic inputs` : "No mic inputs found",
+      text: deviceSnapshot.devices.length > 0 ? `${deviceSnapshot.devices.length} audio inputs` : "No audio inputs found",
       cls: "rxn-pill",
     });
     if (!deviceSnapshot.labelsAvailable) {
       meta.createEl("span", {
-        text: "Labels improve after granting mic permission",
+        text: "Labels improve after microphone access is granted",
         cls: "rxn-pill",
       });
     }
@@ -408,8 +408,8 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       .setName("Microphone device")
       .setDesc(
         deviceSnapshot.labelsAvailable
-          ? "Pick the main voice input or stay on the system default input."
-          : "Use the system default input or grant permission once to reveal clearer device labels."
+          ? "Choose the voice input you speak into, or leave Resonance on the system default input."
+          : "Use the system default input or allow microphone access once to reveal clearer device labels."
       );
     const micSelect = micSetting.controlEl.createEl("select");
     micSelect.addClass("rxn-inline-select");
@@ -436,7 +436,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     capture.createEl("p", {
       cls: "rxn-muted",
       text:
-        "Optional. Add loopback or monitor inputs here if you want Teams, Meet, browser tabs, or desktop audio in the same recording.",
+        "Optional. Add loopback or monitor inputs here if you also want call, browser, or desktop audio in the same recording.",
     });
 
     const additionalSourceCandidates = deviceSnapshot.devices.filter(
@@ -455,14 +455,14 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       const stale = capture.createDiv({ cls: "rxn-inline-note is-warning" });
       stale.createEl("strong", { text: "Saved sources need review" });
       stale.createEl("p", {
-        text: `${staleAdditionalCount} saved additional source${staleAdditionalCount === 1 ? "" : "s"} are unavailable or conflict with the microphone and will be ignored until you update them.`,
+        text: `${staleAdditionalCount} saved additional source${staleAdditionalCount === 1 ? "" : "s"} are unavailable or duplicate the microphone and will be ignored until you update them.`,
       });
     }
 
     if (additionalSourceCandidates.length === 0) {
       capture.createEl("p", {
         cls: "rxn-muted",
-        text: "No additional audio inputs are currently available.",
+        text: "No extra audio inputs are currently available.",
       });
     } else {
       additionalSourceCandidates.forEach((device) => {
@@ -494,7 +494,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
 
     new Setting(capture)
       .setName("Segment seconds")
-      .setDesc("How often live transcript chunks are committed.")
+      .setDesc("How often live transcript updates are committed.")
       .addText((text) =>
         text.setPlaceholder("20").setValue(String(settings.capture.segmentDurationSeconds)).onChange(async (value) => {
           await this.options.saveSettings((current) => ({
@@ -921,7 +921,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     const library = this.createGuideSection(container, {
       badge: "Workspace",
       title: uiCopy.library.title,
-      intro: "Review completed and failed sessions here.",
+      intro: "Review sessions, notes, storage, and cleanup actions here.",
     });
 
     const controls = library.createDiv({ cls: "rxn-toolbar" });
@@ -1527,7 +1527,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     await this.display();
 
     try {
-      new Notice("Quick test started...");
+      new Notice("Quick test started. Obsidian may ask for microphone access.");
       const result = await this.options.controller.runSmokeTest();
       this.smokeMessage = result.ok
         ? uiCopy.diagnostics.smokePassed
@@ -1626,13 +1626,13 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
   private getWebPermissionLabel(permission: WebAudioPermissionState): string {
     switch (permission) {
       case "granted":
-        return "Granted";
+        return "Ready";
       case "denied":
         return "Denied";
       case "prompt":
-        return "Not requested";
+        return "Needs access";
       case "unsupported":
-        return "Unsupported";
+        return "Unavailable";
       case "unknown":
       default:
         return "Unknown";

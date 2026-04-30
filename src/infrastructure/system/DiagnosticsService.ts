@@ -51,7 +51,7 @@ export class DiagnosticsService {
       severity: isCoreConfigured(settings) ? "ok" : "error",
       detail: isCoreConfigured(settings)
         ? "Core local-first path is configured."
-        : "Web Audio capture is ready, but transcription or summary configuration is still incomplete.",
+        : "Recording is ready, but transcription or summary setup is still incomplete.",
       remediation: "Open Setup & Settings in the plugin settings tab and complete the missing dependency step.",
     });
 
@@ -69,7 +69,7 @@ export class DiagnosticsService {
       label: "Web Audio capture",
       severity: capability.hasGetUserMedia && capability.hasEnumerateDevices ? "ok" : "error",
       detail: capability.hasGetUserMedia && capability.hasEnumerateDevices
-        ? `Web Audio APIs are available${permissionState === "granted" ? " and microphone permission is granted." : permissionState === "prompt" ? ". Microphone permission will be requested on first recording." : permissionState === "denied" ? ", but microphone permission is denied." : "."}`
+        ? `Web Audio APIs are available${permissionState === "granted" ? " and microphone access is granted." : permissionState === "prompt" ? ". Microphone access will be requested on the first recording or quick test." : permissionState === "denied" ? ", but microphone access is denied." : "."}`
         : "Required browser audio APIs are unavailable in this runtime.",
       remediation:
         permissionState === "denied"
@@ -82,7 +82,7 @@ export class DiagnosticsService {
       label: "Audio input devices",
       severity: deviceSnapshot.devices.length > 0 ? "ok" : "warning",
       detail: deviceSnapshot.devices.length > 0
-        ? `${deviceSnapshot.devices.length} audio input${deviceSnapshot.devices.length === 1 ? "" : "s"} discovered via Web Audio.${deviceSnapshot.labelsAvailable ? "" : " Device labels will become more descriptive after microphone permission is granted."}`
+        ? `${deviceSnapshot.devices.length} audio input${deviceSnapshot.devices.length === 1 ? "" : "s"} discovered.${deviceSnapshot.labelsAvailable ? "" : " Labels become more descriptive after microphone access is granted."}`
         : "No audio inputs were discovered via Web Audio.",
       remediation: "Grant microphone permission and check the OS input devices if the list stays empty.",
     });
@@ -96,8 +96,8 @@ export class DiagnosticsService {
       detail: selectedMic
         ? selectedMicPresent
           ? "Selected microphone is available."
-          : "Selected microphone is unavailable. Recording will fall back to the system default input."
-        : "No specific microphone selected. Recording will use the system default input.",
+          : "Selected microphone is unavailable. Resonance will use the current system default input instead."
+        : "No specific microphone selected. Resonance will use the current system default input.",
       remediation: "Choose a microphone device if you want to pin one instead of following the OS default.",
     });
 
@@ -124,7 +124,7 @@ export class DiagnosticsService {
           : "ok",
       detail:
         additionalSources.length === 0
-          ? "No additional sources selected. Recording will use only the microphone."
+          ? "No additional sources selected. Recordings will use only the microphone."
           : duplicateIds.size > 0
             ? "Some additional sources are duplicated and will be ignored."
             : sameAsMicSources.length > 0
@@ -133,7 +133,7 @@ export class DiagnosticsService {
                 ? `${missingSources.length} selected additional source${missingSources.length === 1 ? "" : "s"} are unavailable and will be skipped.`
                 : `${additionalSources.length} additional source${additionalSources.length === 1 ? "" : "s"} selected for the recording mix.`,
       remediation:
-        "Keep only the extra audioinput devices you actually want to mix in, such as loopback or monitor inputs.",
+        "Keep only the extra audio inputs you actually want to mix in, such as loopback or monitor sources.",
     });
 
     addCheck({
@@ -244,7 +244,7 @@ export class DiagnosticsService {
         const transcriptionAdapter = new WhisperTranscriptionAdapter(settings.transcription);
         const transcript = await transcriptionAdapter.transcribeFile(audioPath);
         if (!transcript.trim()) {
-          return { ok: false, detail: "Quick test recorded audio, but whisper.cpp returned an empty transcript." };
+          return { ok: false, detail: "Quick test captured audio, but whisper.cpp returned an empty transcript." };
         }
       }
 

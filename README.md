@@ -1,59 +1,156 @@
 # Resonance
 
-Resonance is the clean-slate v2 of the Obsidian recording plugin. The product is now built around a local-first pipeline, settings-first setup, and manifest-backed session storage.
+![Resonance banner](assets/banner.png)
 
-## Fastest Setup
+Resonance is a local-first AI recorder for Obsidian.
 
-If this machine already has a built `whisper.cpp` and at least one local ggml model:
+It is built around:
 
-1. Open the plugin settings page.
-2. Work through **Step 1**, **Step 2**, and **Step 3** from top to bottom.
-3. Use the Detect buttons to fill paths automatically when possible.
-4. Pick a microphone and run **Quick test**.
-5. Leave **Ollama** as the provider unless you intentionally want a cloud provider.
+- Web Audio capture
+- Whisper for transcription
+- Ollama or an optional cloud provider for summaries
+- Session storage with a built-in library
 
-The settings page is now the full setup flow. Nothing important is hidden behind a separate setup modal.
+The product is desktop-only.
 
-## What Changed
+## What Resonance Does
 
-- `src/` is the only active application tree for v2.
-- The primary entrypoint is now the plugin settings surface instead of a simple start/stop flow.
-- Recording state is driven by an explicit session controller with ordered live transcription.
-- Sessions are stored as structured manifests with `audio/`, `transcript/`, `summary/`, and `diagnostics.log`.
-- The session library is manifest-backed. It no longer scans raw media files blindly.
+- Records from one main microphone plus optional extra audio inputs in the same Web Audio graph
+- Writes live transcript updates while recording
+- Builds a final summary note after the recording stops
+- Stores each session with audio, transcript, summary, and diagnostics
+- Lets you inspect, recover, clean up, and bulk-delete session artifacts from the Library
 
-## Product Direction
+## Screenshots
 
-- Desktop-only Obsidian plugin
-- Local-first path: `Web Audio` + `whisper.cpp` + `Ollama`
-- Cloud summary providers remain available as secondary adapters
-- Native Obsidian settings are now the primary surface, with horizontal tabs for diagnostics, library, and setup
+### Recorder
 
-## Current Information Architecture
+![Recorder UI](assets/recorder.png)
 
-- Diagnostics
-  - Health status and blocking issues
-  - Quick test
-  - Startup behavior
-  - Setup guidance when the local path is incomplete
-- Setup & Settings
-  - Horizontal tabs for Diagnostics, Library, Capture, Transcription, Summary, and Output
-  - Capture tab for microphone, additional sources, and quick test
-  - Transcription tab for whisper.cpp, CLI, and model
-  - Summary tab for Ollama or cloud providers
-  - Output tab for vault, retention, and startup behavior
-- Session Library
-  - Filters for `done` and `failed`
-  - Artifact availability
-  - Transcript, diagnostics, audio, and summary actions
+### Library
 
-## Repository Layout
+![Library UI](assets/library.png)
 
-```text
-src/            Active Resonance v2 source
-tests/          Pure unit tests for v2
-dist/           Build output
+## First Successful Session
+
+1. Install the plugin in your vault.
+2. Open the Resonance settings page.
+3. In `Capture`, choose your microphone.
+4. Optionally add loopback or monitor inputs under `Additional sources` if you want call or desktop audio in the same recording.
+5. In `Transcription`, set the `whisper.cpp` repo, CLI, and model paths.
+6. In `Summary`, keep `Ollama` or choose a cloud provider.
+7. Run `Quick test`.
+8. Open the recorder and make a short recording.
+9. Stop the session and confirm that the transcript and summary appear in the Library.
+
+## Setup Overview
+
+### Capture
+
+- `Microphone device`: the voice input you speak into
+- `Additional sources`: optional extra audio inputs such as loopback or monitor devices
+- `Segment seconds`: how often live transcript updates are committed
+- `Quick test`: verifies microphone access and the local pipeline
+
+### Transcription
+
+Resonance expects a local `whisper.cpp` build plus a readable ggml model.
+
+Typical setup:
+
+```bash
+git clone https://github.com/ggerganov/whisper.cpp
+cd whisper.cpp
+cmake -S . -B build
+cmake --build build -j
 ```
+
+Then download a model, for example:
+
+```bash
+cd /path/to/whisper.cpp/models
+./download-ggml-model.sh small
+```
+
+Set:
+
+- `whisper.cpp repo`
+- `whisper.cpp CLI`
+- `Model path`
+
+### Summary
+
+Recommended local path:
+
+- provider: `Ollama`
+- endpoint: `http://localhost:11434`
+- model: `gemma3`
+
+Cloud providers are also supported, but they require API credentials on the machine where the plugin runs.
+
+### Library
+
+The Library is the operational workspace for finished and failed sessions.
+
+It supports:
+
+- previewing transcript and diagnostics
+- opening transcript and summary notes
+- audio playback and export
+- recovery actions when transcript or summary is missing
+- bulk cleanup with storage estimates
+- storage stats for visible sessions
+
+## Runtime Artifacts
+
+Each supported session persists:
+
+- `session.json`
+- `audio/recording.wav`
+- `audio/segments/`
+- `transcript/live-transcript.txt`
+- `summary/summary.md`
+- `diagnostics.log`
+
+The session Library reads these manifests rather than scanning arbitrary files.
+
+## Common Failures
+
+### Microphone access denied
+
+Symptoms:
+
+- Quick test fails before recording starts
+- Capture diagnostics show microphone access denied
+
+Fix:
+
+- Re-enable microphone access for Obsidian in the operating system settings
+- Return to Resonance and run `Quick test` again
+
+### whisper.cpp or model missing
+
+Symptoms:
+
+- Diagnostics block recording
+- Quick test captures audio but transcription fails
+
+Fix:
+
+- Point Resonance to a working `whisper.cpp` CLI
+- Set a readable ggml model file such as `ggml-small.bin`
+
+### Additional source unavailable
+
+Symptoms:
+
+- A saved loopback or monitor input no longer appears
+- Diagnostics warn that extra sources will be skipped
+
+Fix:
+
+- Re-select the source in `Capture`
+- Remove stale additional inputs you no longer use
 
 ## Local Development
 
@@ -61,8 +158,8 @@ Requirements:
 
 - Obsidian desktop
 - Node.js
-- whisper.cpp with a local model
-- Ollama if you want the full tier-1 local path
+- `whisper.cpp` with a local ggml model
+- Ollama if you want the default local summary path
 
 Commands:
 
@@ -72,39 +169,11 @@ npm test
 npm run build
 ```
 
-## Install In Obsidian
+## Manual Install in Obsidian
 
-1. Build the plugin with `npm run build`.
+1. Run `npm run build`.
 2. Copy `dist/main.js`, `dist/manifest.json`, and `dist/styles.css` into your vault plugin folder.
 3. Enable `Resonance` in Obsidian community plugins.
-4. Open the plugin settings page.
-5. Use the `Capture` tab for microphone and additional sources, then `Transcription` and `Summary`.
-6. When setup is done, use the `Diagnostics` tab for health and the `Library` tab for saved session artifacts.
-
-## Minimum Local Requirements
-
-To record and summarize locally, Resonance needs:
-
-- `whisper.cpp` CLI
-- a readable local ggml model file
-- `Ollama` running locally for summaries
-
-If auto-detect fails, the manual fallback is:
-
-1. Point Step 3 in plugin settings at your `whisper.cpp` repo.
-2. Detect or set the `whisper.cpp` CLI path.
-3. Detect or set the ggml model path.
-4. Return to Step 2 and run the quick test.
-
-## Runtime Model
-
-Each session persists:
-
-- `session.json`
-- `audio/recording.wav`
-- `audio/segments/`
-- `transcript/live-transcript.txt`
-- `summary/summary.md`
-- `diagnostics.log`
-
-The live transcription queue commits segments strictly in order and the stop flow waits for the queue to flush before summary generation starts.
+4. Open the Resonance settings page.
+5. Work through `Capture`, `Transcription`, and `Summary`.
+6. Use `Diagnostics` for health checks and `Library` for saved sessions.
