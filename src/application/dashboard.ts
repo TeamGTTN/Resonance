@@ -1,6 +1,13 @@
 import type { DashboardSnapshot, DiagnosticsGroups } from "../domain/dashboard";
 import type { DiagnosticsReport } from "../domain/diagnostics";
-import type { RecordingSessionManifest, SessionHealthBadge, SessionListItem, SessionRuntimeSnapshot } from "../domain/session";
+import type {
+  RecordingSessionManifest,
+  SessionHealthBadge,
+  SessionLibraryStats,
+  SessionListItem,
+  SessionRuntimeSnapshot,
+  SessionArtifactSizeBreakdown,
+} from "../domain/session";
 import { uiCopy } from "../ui/copy";
 
 export function groupDiagnosticsChecks(report?: DiagnosticsReport): DiagnosticsGroups {
@@ -22,7 +29,10 @@ export function deriveSessionHealthBadge(manifest: RecordingSessionManifest): Se
   return "healthy";
 }
 
-export function deriveSessionListItem(manifest: RecordingSessionManifest, audioSizeBytes: number): SessionListItem {
+export function deriveSessionListItem(
+  manifest: RecordingSessionManifest,
+  storageBreakdown: SessionArtifactSizeBreakdown
+): SessionListItem {
   return {
     sessionId: manifest.sessionId,
     scenarioKey: manifest.scenarioKey,
@@ -36,7 +46,9 @@ export function deriveSessionListItem(manifest: RecordingSessionManifest, audioS
     status: manifest.status,
     elapsedSeconds: manifest.runtime.elapsedSeconds,
     committedSegments: manifest.live.committedSegments,
-    audioSizeBytes,
+    audioSizeBytes: storageBreakdown.audioBytes,
+    storageBytes: storageBreakdown.totalBytes,
+    storageBreakdown,
     healthBadge: deriveSessionHealthBadge(manifest),
     failureSummary: manifest.runtime.failureSummary || manifest.errors[manifest.errors.length - 1],
     diagnosticsSummary: manifest.diagnosticsSummary.summary,
@@ -56,6 +68,28 @@ export function deriveSessionListItem(manifest: RecordingSessionManifest, audioS
       liveTranscriptNotePath: manifest.notes.liveTranscriptNotePath,
     },
   };
+}
+
+export function summarizeSessionListItems(items: SessionListItem[]): SessionLibraryStats {
+  return items.reduce<SessionLibraryStats>(
+    (summary, item) => {
+      summary.sessionCount += 1;
+      summary.audioBytes += item.storageBreakdown.audioBytes;
+      summary.transcriptBytes += item.storageBreakdown.transcriptBytes;
+      summary.summaryBytes += item.storageBreakdown.summaryBytes;
+      summary.diagnosticsBytes += item.storageBreakdown.diagnosticsBytes;
+      summary.totalBytes += item.storageBreakdown.totalBytes;
+      return summary;
+    },
+    {
+      sessionCount: 0,
+      audioBytes: 0,
+      transcriptBytes: 0,
+      summaryBytes: 0,
+      diagnosticsBytes: 0,
+      totalBytes: 0,
+    }
+  );
 }
 
 function describeSessionSource(manifest: RecordingSessionManifest): string {

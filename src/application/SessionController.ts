@@ -73,7 +73,9 @@ export class SessionController {
 
   async listRecentSessions(limit = 12): Promise<SessionListItem[]> {
     const manifests = await this.store.listSessions();
-    return manifests.slice(0, limit).map((manifest) => deriveSessionListItem(manifest, this.store.getAudioSize(manifest.paths.fullAudioPath)));
+    return manifests
+      .slice(0, limit)
+      .map((manifest) => deriveSessionListItem(manifest, this.store.getSessionStorageBreakdown(manifest)));
   }
 
   async runDiagnostics() {
@@ -117,7 +119,7 @@ export class SessionController {
     }
     await this.store.appendDiagnostics(manifest, "Manual recovery: transcript regeneration completed.");
     await this.store.writeManifest(manifest);
-    return deriveSessionListItem(manifest, this.store.getAudioSize(manifest.paths.fullAudioPath));
+    return deriveSessionListItem(manifest, this.store.getSessionStorageBreakdown(manifest));
   }
 
   async regenerateSummary(rootDir: string): Promise<SessionListItem> {
@@ -154,7 +156,7 @@ export class SessionController {
     manifest.runtime.finishedAt = new Date().toISOString();
     await this.store.appendDiagnostics(manifest, `Manual recovery: summary note created at ${manifest.notes.summaryNotePath}.`);
     await this.store.writeManifest(manifest);
-    return deriveSessionListItem(manifest, this.store.getAudioSize(manifest.paths.fullAudioPath));
+    return deriveSessionListItem(manifest, this.store.getSessionStorageBreakdown(manifest));
   }
 
   async startScenario(scenarioKey: string): Promise<void> {

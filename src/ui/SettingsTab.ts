@@ -1,8 +1,8 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
-import { buildDashboardSnapshot, deriveSessionListItem } from "../application/dashboard";
+import { buildDashboardSnapshot, deriveSessionListItem, summarizeSessionListItems } from "../application/dashboard";
 import type { SessionController } from "../application/SessionController";
 import type { DashboardSnapshot } from "../domain/dashboard";
-import type { SessionListItem } from "../domain/session";
+import type { RecordingSessionManifest, SessionCleanupAction, SessionListItem } from "../domain/session";
 import { isCoreConfigured, type PluginSettings } from "../domain/settings";
 import { VaultAdapter } from "../infrastructure/adapters/VaultAdapter";
 import { requireNodeModule } from "../infrastructure/node";
@@ -117,9 +117,11 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
   private libraryItems: SessionListItem[] = [];
   private libraryFilter: LibraryFilter = "all";
   private libraryQuery = "";
+  private librarySelectedIds = new Set<string>();
   private openAudioSessionId: string | null = null;
   private libraryBusySessionId: string | null = null;
   private libraryBusyAction: "transcript" | "summary" | null = null;
+  private libraryBulkAction: SessionCleanupAction | null = null;
   private isQuickTestRunning = false;
   private smokeMessage: string | null = null;
 
@@ -251,7 +253,11 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
   private async refreshLibraryData() {
     const manifests = await this.store.listSessions();
     this.libraryItems = manifests.map((manifest) =>
-      deriveSessionListItem(manifest, this.store.getAudioSize(manifest.paths.fullAudioPath))
+      deriveSessionListItem(manifest, this.store.getSessionStorageBreakdown(manifest))
+    );
+    const validIds = new Set(this.libraryItems.map((item) => item.sessionId));
+    this.librarySelectedIds = new Set(
+      [...this.librarySelectedIds].filter((sessionId) => validIds.has(sessionId))
     );
   }
 
@@ -942,7 +948,62 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       this.openLibraryFolder();
     }, "rxn-btn-secondary");
 
-    const items = this.getFilteredLibraryItems();
+    let items = this.getFilteredLibraryItems();
+    this.trimLibrarySelectionToVisible(items);
+    items = this.getFilteredLibraryItems();
+    const selectedItems = this.getSelectedLibraryItems(items);
+    const stats = summarizeSessionListItems(items);
+
+    this.createActionButton(controls, uiCopy.actions.selectAllVisible, async () => {
+      this.librarySelectedIds = new Set(items.map((item) => item.sessionId));
+      await this.display();
+    }, "rxn-btn-secondary", items.length === 0 || selectedItems.length === items.length);
+
+    const statsRow = library.createDiv({ cls: "rxn-library-stats" });
+    this.renderLibraryStat(statsRow, "Shown", String(stats.sessionCount));
+    this.renderLibraryStat(statsRow, "Total", formatBytes(stats.totalBytes));
+    this.renderLibraryStat(statsRow, "Audio", formatBytes(stats.audioBytes));
+    this.renderLibraryStat(statsRow, "Transcript", formatBytes(stats.transcriptBytes));
+    this.renderLibraryStat(statsRow, "Summary", formatBytes(stats.summaryBytes));
+    this.renderLibraryStat(statsRow, "Diagnostics", formatBytes(stats.diagnosticsBytes));
+
+    if (selectedItems.length > 0) {
+      const bulkBar = library.createDiv({ cls: "rxn-library-bulkbar" });
+      bulkBar.createEl("strong", { text: `${selectedItems.length} selected` });
+      const bulkActions = bulkBar.createDiv({ cls: "rxn-action-bar" });
+      const bulkBusy = this.libraryBulkAction !== null;
+      this.createActionButton(
+        bulkActions,
+        bulkBusy && this.libraryBulkAction === "audio" ? "Deleting audio..." : uiCopy.actions.deleteAudio,
+        async () => {
+          await this.deleteLibraryAudio(selectedItems);
+        },
+        "rxn-btn-danger",
+        bulkBusy || !selectedItems.some((item) => item.artifactAvailability.hasAudio)
+      );
+      this.createActionButton(
+        bulkActions,
+        bulkBusy && this.libraryBulkAction === "transcript" ? "Deleting transcript..." : uiCopy.actions.deleteTranscript,
+        async () => {
+          await this.deleteLibraryTranscript(selectedItems);
+        },
+        "rxn-btn-danger",
+        bulkBusy || !selectedItems.some((item) => item.artifactAvailability.hasTranscript)
+      );
+      this.createActionButton(
+        bulkActions,
+        bulkBusy && this.libraryBulkAction === "session" ? "Deleting sessions..." : uiCopy.actions.deleteSession,
+        async () => {
+          await this.deleteLibrarySessions(selectedItems);
+        },
+        "rxn-btn-danger",
+        bulkBusy
+      );
+      this.createActionButton(bulkActions, uiCopy.actions.clearSelection, async () => {
+        this.librarySelectedIds.clear();
+        await this.display();
+      }, "rxn-btn-secondary", bulkBusy);
+    }
     if (items.length === 0) {
       library.createEl("p", { text: uiCopy.library.empty, cls: "rxn-muted" });
       return;
@@ -950,11 +1011,30 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
 
     const list = library.createDiv({ cls: "rxn-session-workspace" });
     for (const item of items) {
-      const isBusy = this.libraryBusySessionId === item.sessionId;
+      const isBusy = this.libraryBusySessionId === item.sessionId || this.libraryBulkAction !== null;
+      const isSelected = this.librarySelectedIds.has(item.sessionId);
       const needsTranscript = item.artifactAvailability.hasAudio && !item.artifactAvailability.hasTranscript;
       const needsSummary = item.artifactAvailability.hasTranscript && !item.artifactAvailability.hasSummary;
       const card = list.createDiv({ cls: "rxn-session-workspace-card" });
+      if (isSelected) {
+        card.addClass("is-selected");
+      }
       const header = card.createDiv({ cls: "rxn-session-header" });
+      const select = header.createDiv({ cls: "rxn-session-select" });
+      const selectToggle = select.createEl("input", {
+        attr: { type: "checkbox", "aria-label": `Select ${item.scenarioLabel}` },
+        cls: "rxn-session-checkbox",
+      });
+      selectToggle.checked = isSelected;
+      selectToggle.disabled = isBusy;
+      selectToggle.addEventListener("change", async () => {
+        if (selectToggle.checked) {
+          this.librarySelectedIds.add(item.sessionId);
+        } else {
+          this.librarySelectedIds.delete(item.sessionId);
+        }
+        await this.display();
+      });
       const titleBlock = header.createDiv({ cls: "rxn-session-title" });
       titleBlock.createEl("strong", { text: item.scenarioLabel });
       titleBlock.createEl("span", {
@@ -971,7 +1051,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       this.renderSessionMeta(meta, "Started", new Date(item.createdAt).toLocaleString());
       this.renderSessionMeta(meta, "Duration", formatDuration(item.elapsedSeconds));
       this.renderSessionMeta(meta, "Segments", String(item.committedSegments));
-      this.renderSessionMeta(meta, "Audio", formatBytes(item.audioSizeBytes));
+      this.renderSessionMeta(meta, "Storage", formatBytes(item.storageBytes));
       this.renderSessionMeta(meta, "Last activity", new Date(item.lastActivityAt).toLocaleString());
 
       const artifactRow = card.createDiv({ cls: "rxn-pill-row" });
@@ -1056,42 +1136,14 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       }, "rxn-btn-secondary", isBusy);
 
       const dangerMenu = this.createSessionActionMenu(menus, "Delete", true);
-      this.createActionButton(dangerMenu, "Delete audio", async () => {
-        const ok = confirm("Delete saved audio for this session and keep the transcript/summary?");
-        if (!ok) return;
-        this.openAudioSessionId = this.openAudioSessionId === item.sessionId ? null : this.openAudioSessionId;
-        const manifest = await this.store.readSessionByRootDir(item.paths.rootDir);
-        if (!manifest) return;
-        await this.store.deleteAudioArtifacts(manifest);
-        await this.store.appendDiagnostics(manifest, "Manual cleanup: audio artifacts deleted.");
-        await this.store.writeManifest(manifest);
-        new Notice("Audio deleted.");
-        await this.refreshLibraryData();
-        await this.display();
+      this.createActionButton(dangerMenu, uiCopy.actions.deleteAudio, async () => {
+        await this.deleteLibraryAudio([item]);
       }, "rxn-btn-danger", isBusy || !item.artifactAvailability.hasAudio);
-      this.createActionButton(dangerMenu, "Delete transcript", async () => {
-        const ok = confirm("Delete saved transcript for this session and keep the summary if it exists?");
-        if (!ok) return;
-        const manifest = await this.store.readSessionByRootDir(item.paths.rootDir);
-        if (!manifest) return;
-        await this.vaultAdapter.deleteFile(manifest.notes.liveTranscriptNotePath);
-        manifest.notes.liveTranscriptNotePath = undefined;
-        await this.store.deleteTranscriptArtifacts(manifest);
-        await this.store.appendDiagnostics(manifest, "Manual cleanup: transcript artifacts deleted.");
-        await this.store.writeManifest(manifest);
-        new Notice("Transcript deleted.");
-        await this.refreshLibraryData();
-        await this.display();
+      this.createActionButton(dangerMenu, uiCopy.actions.deleteTranscript, async () => {
+        await this.deleteLibraryTranscript([item]);
       }, "rxn-btn-danger", isBusy || !item.artifactAvailability.hasTranscript);
       this.createActionButton(dangerMenu, uiCopy.actions.deleteSession, async () => {
-        const ok = confirm(uiCopy.library.deleteConfirmation);
-        if (!ok) return;
-        await this.vaultAdapter.deleteFile(item.notes.summaryNotePath);
-        await this.vaultAdapter.deleteFile(item.notes.liveTranscriptNotePath);
-        await this.store.deleteSessionRootDir(item.paths.rootDir);
-        new Notice(uiCopy.notices.sessionDeleted);
-        await this.refreshLibraryData();
-        await this.display();
+        await this.deleteLibrarySessions([item]);
       }, "rxn-btn-danger", isBusy);
 
       if (this.openAudioSessionId === item.sessionId && item.artifactAvailability.hasAudio) {
@@ -1105,6 +1157,130 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     const item = container.createDiv({ cls: "rxn-session-meta-item" });
     item.createEl("span", { text: `${label}:`, cls: "rxn-session-meta-label" });
     item.createEl("span", { text: value, cls: "rxn-session-meta-value" });
+  }
+
+  private renderLibraryStat(container: HTMLElement, label: string, value: string) {
+    const item = container.createDiv({ cls: "rxn-library-stat" });
+    item.createEl("span", { text: label, cls: "rxn-library-stat-label" });
+    item.createEl("strong", { text: value, cls: "rxn-library-stat-value" });
+  }
+
+  private trimLibrarySelectionToVisible(items: SessionListItem[]) {
+    const visibleIds = new Set(items.map((item) => item.sessionId));
+    this.librarySelectedIds = new Set(
+      [...this.librarySelectedIds].filter((sessionId) => visibleIds.has(sessionId))
+    );
+  }
+
+  private getSelectedLibraryItems(items: SessionListItem[]): SessionListItem[] {
+    return items.filter((item) => this.librarySelectedIds.has(item.sessionId));
+  }
+
+  private dropLibrarySelection(sessionIds: string[]) {
+    for (const sessionId of sessionIds) {
+      this.librarySelectedIds.delete(sessionId);
+    }
+  }
+
+  private async loadLibraryManifests(items: SessionListItem[]): Promise<RecordingSessionManifest[]> {
+    const manifests = await Promise.all(items.map((item) => this.store.readSessionByRootDir(item.paths.rootDir)));
+    return manifests.filter((manifest): manifest is RecordingSessionManifest => Boolean(manifest));
+  }
+
+  private async deleteLibraryAudio(items: SessionListItem[]) {
+    const manifests = (await this.loadLibraryManifests(items)).filter((manifest) => manifest.artifacts.hasAudio);
+    if (manifests.length === 0) return;
+
+    const skippedCount = items.length - manifests.length;
+    const reclaimableBytes = this.store.getReclaimableBytesForSessions(manifests, "audio");
+    const ok = confirm(
+      `Delete saved audio for ${manifests.length} session${manifests.length === 1 ? "" : "s"}? Transcript and summary will be kept.${skippedCount > 0 ? ` ${skippedCount} selected session${skippedCount === 1 ? "" : "s"} will be skipped because they have no audio.` : ""} Estimated space to free: ${formatBytes(reclaimableBytes)}.`
+    );
+    if (!ok) return;
+
+    this.libraryBulkAction = "audio";
+    this.openAudioSessionId = manifests.some((manifest) => manifest.sessionId === this.openAudioSessionId)
+      ? null
+      : this.openAudioSessionId;
+    await this.display();
+
+    try {
+      await this.store.deleteAudioArtifactsMany(manifests);
+      for (const manifest of manifests) {
+        await this.store.appendDiagnostics(manifest, "Manual cleanup: audio artifacts deleted.");
+        await this.store.writeManifest(manifest);
+      }
+      this.dropLibrarySelection(manifests.map((manifest) => manifest.sessionId));
+      new Notice(`Audio deleted from ${manifests.length} session${manifests.length === 1 ? "" : "s"}.`);
+      await this.refreshLibraryData();
+    } finally {
+      this.libraryBulkAction = null;
+      await this.display();
+    }
+  }
+
+  private async deleteLibraryTranscript(items: SessionListItem[]) {
+    const manifests = (await this.loadLibraryManifests(items)).filter((manifest) => manifest.artifacts.hasTranscript);
+    if (manifests.length === 0) return;
+
+    const skippedCount = items.length - manifests.length;
+    const reclaimableBytes = this.store.getReclaimableBytesForSessions(manifests, "transcript");
+    const ok = confirm(
+      `Delete saved transcript for ${manifests.length} session${manifests.length === 1 ? "" : "s"}? Summary will be kept if it exists.${skippedCount > 0 ? ` ${skippedCount} selected session${skippedCount === 1 ? "" : "s"} will be skipped because they have no transcript.` : ""} Estimated space to free: ${formatBytes(reclaimableBytes)}.`
+    );
+    if (!ok) return;
+
+    this.libraryBulkAction = "transcript";
+    await this.display();
+
+    try {
+      for (const manifest of manifests) {
+        await this.vaultAdapter.deleteFile(manifest.notes.liveTranscriptNotePath);
+        manifest.notes.liveTranscriptNotePath = undefined;
+      }
+      await this.store.deleteTranscriptArtifactsMany(manifests);
+      for (const manifest of manifests) {
+        await this.store.appendDiagnostics(manifest, "Manual cleanup: transcript artifacts deleted.");
+        await this.store.writeManifest(manifest);
+      }
+      this.dropLibrarySelection(manifests.map((manifest) => manifest.sessionId));
+      new Notice(`Transcript deleted from ${manifests.length} session${manifests.length === 1 ? "" : "s"}.`);
+      await this.refreshLibraryData();
+    } finally {
+      this.libraryBulkAction = null;
+      await this.display();
+    }
+  }
+
+  private async deleteLibrarySessions(items: SessionListItem[]) {
+    const manifests = await this.loadLibraryManifests(items);
+    if (manifests.length === 0) return;
+
+    const reclaimableBytes = this.store.getReclaimableBytesForSessions(manifests, "session");
+    const ok = confirm(
+      `Delete ${manifests.length} session${manifests.length === 1 ? "" : "s"} and their linked notes? Estimated space to free: ${formatBytes(reclaimableBytes)}.`
+    );
+    if (!ok) return;
+
+    this.libraryBulkAction = "session";
+    this.openAudioSessionId = manifests.some((manifest) => manifest.sessionId === this.openAudioSessionId)
+      ? null
+      : this.openAudioSessionId;
+    await this.display();
+
+    try {
+      for (const manifest of manifests) {
+        await this.vaultAdapter.deleteFile(manifest.notes.summaryNotePath);
+        await this.vaultAdapter.deleteFile(manifest.notes.liveTranscriptNotePath);
+      }
+      await this.store.deleteSessionFilesMany(manifests);
+      this.dropLibrarySelection(manifests.map((manifest) => manifest.sessionId));
+      new Notice(`${manifests.length} session${manifests.length === 1 ? "" : "s"} deleted.`);
+      await this.refreshLibraryData();
+    } finally {
+      this.libraryBulkAction = null;
+      await this.display();
+    }
   }
 
   private createSessionActionMenu(container: HTMLElement, label: string, isDanger = false): HTMLElement {

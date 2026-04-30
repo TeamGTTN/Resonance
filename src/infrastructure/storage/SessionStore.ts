@@ -6,6 +6,9 @@ import {
   isSupportedSessionManifest,
   type DiagnosticsSummary,
   type RecordingSessionManifest,
+  type SessionArtifactSizeBreakdown,
+  type SessionCleanupAction,
+  type SessionLibraryStats,
 } from "../../domain/session";
 import type { ScenarioTemplate } from "../../domain/scenarios";
 import { getVaultBasePath, getVaultConfigDir, requireNodeModule } from "../node";
@@ -212,6 +215,12 @@ export class SessionStore {
     await this.deleteSessionRootDir(manifest.paths.rootDir);
   }
 
+  async deleteSessionFilesMany(manifests: RecordingSessionManifest[]): Promise<void> {
+    for (const manifest of manifests) {
+      await this.deleteSessionFiles(manifest);
+    }
+  }
+
   async deleteSessionRootDir(rootDir: string): Promise<void> {
     const fs = requireNodeModule<FsModule>("fs");
     fs.rmSync(rootDir, { recursive: true, force: true });
@@ -229,10 +238,22 @@ export class SessionStore {
     manifest.artifacts.hasAudio = false;
   }
 
+  async deleteAudioArtifactsMany(manifests: RecordingSessionManifest[]): Promise<void> {
+    for (const manifest of manifests) {
+      await this.deleteAudioArtifacts(manifest);
+    }
+  }
+
   async deleteTranscriptArtifacts(manifest: RecordingSessionManifest): Promise<void> {
     const fs = requireNodeModule<FsModule>("fs");
     fs.writeFileSync(manifest.paths.transcriptTextPath, "", { encoding: "utf8" });
     manifest.artifacts.hasTranscript = false;
+  }
+
+  async deleteTranscriptArtifactsMany(manifests: RecordingSessionManifest[]): Promise<void> {
+    for (const manifest of manifests) {
+      await this.deleteTranscriptArtifacts(manifest);
+    }
   }
 
   readTextFile(path: string): string {
@@ -241,13 +262,59 @@ export class SessionStore {
     return String(fs.readFileSync(path, { encoding: "utf8" }));
   }
 
-  getAudioSize(path: string): number {
+  getSessionStorageBreakdown(manifest: RecordingSessionManifest): SessionArtifactSizeBreakdown {
     const fs = requireNodeModule<FsModule>("fs");
-    try {
-      return fs.statSync(path).size || 0;
-    } catch {
-      return 0;
+    const audioBytes = this.getPathSize(fs, manifest.paths.fullAudioPath) + this.getPathSize(fs, manifest.paths.segmentsDir);
+    const transcriptBytes = this.getPathSize(fs, manifest.paths.transcriptTextPath);
+    const summaryBytes = this.getPathSize(fs, manifest.paths.summaryMarkdownPath);
+    const diagnosticsBytes = this.getPathSize(fs, manifest.paths.diagnosticsLogPath);
+    return {
+      audioBytes,
+      transcriptBytes,
+      summaryBytes,
+      diagnosticsBytes,
+      totalBytes: audioBytes + transcriptBytes + summaryBytes + diagnosticsBytes,
+    };
+  }
+
+  getLibraryStorageStats(manifests: RecordingSessionManifest[]): SessionLibraryStats {
+    return manifests.reduce<SessionLibraryStats>(
+      (stats, manifest) => {
+        const breakdown = this.getSessionStorageBreakdown(manifest);
+        stats.sessionCount += 1;
+        stats.audioBytes += breakdown.audioBytes;
+        stats.transcriptBytes += breakdown.transcriptBytes;
+        stats.summaryBytes += breakdown.summaryBytes;
+        stats.diagnosticsBytes += breakdown.diagnosticsBytes;
+        stats.totalBytes += breakdown.totalBytes;
+        return stats;
+      },
+      {
+        sessionCount: 0,
+        audioBytes: 0,
+        transcriptBytes: 0,
+        summaryBytes: 0,
+        diagnosticsBytes: 0,
+        totalBytes: 0,
+      }
+    );
+  }
+
+  getReclaimableBytes(manifest: RecordingSessionManifest, action: SessionCleanupAction): number {
+    const breakdown = this.getSessionStorageBreakdown(manifest);
+    switch (action) {
+      case "audio":
+        return breakdown.audioBytes;
+      case "transcript":
+        return breakdown.transcriptBytes;
+      case "session":
+      default:
+        return breakdown.totalBytes;
     }
+  }
+
+  getReclaimableBytesForSessions(manifests: RecordingSessionManifest[], action: SessionCleanupAction): number {
+    return manifests.reduce((total, manifest) => total + this.getReclaimableBytes(manifest, action), 0);
   }
 
   private normalizeManifest(manifest: RecordingSessionManifest): RecordingSessionManifest {
@@ -317,6 +384,19 @@ export class SessionStore {
   private readText(fs: FsModule, path: string): string {
     if (!path || !fs.existsSync(path)) return "";
     return String(fs.readFileSync(path, { encoding: "utf8" }));
+  }
+
+  private getPathSize(fs: FsModule, path: string): number {
+    if (!path || !fs.existsSync(path)) return 0;
+    try {
+      const stat = fs.statSync(path);
+      if (!stat.isDirectory()) return stat.size || 0;
+      return fs
+        .readdirSync(path)
+        .reduce((total, entry) => total + this.getPathSize(fs, requireNodeModule<PathModule>("path").join(path, entry)), 0);
+    } catch {
+      return 0;
+    }
   }
 }
 

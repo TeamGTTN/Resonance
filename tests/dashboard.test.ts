@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildDashboardSnapshot, deriveSessionHealthBadge, deriveSessionListItem, groupDiagnosticsChecks } from "../src/application/dashboard";
+import {
+  buildDashboardSnapshot,
+  deriveSessionHealthBadge,
+  deriveSessionListItem,
+  groupDiagnosticsChecks,
+  summarizeSessionListItems,
+} from "../src/application/dashboard";
 import type { DiagnosticsReport } from "../src/domain/diagnostics";
 import type { RecordingSessionManifest, SessionRuntimeSnapshot } from "../src/domain/session";
 
@@ -85,9 +91,16 @@ test("groupDiagnosticsChecks splits checks by severity", () => {
 });
 
 test("deriveSessionListItem exposes dashboard and library metadata", () => {
-  const item = deriveSessionListItem(manifest, 42_000);
+  const item = deriveSessionListItem(manifest, {
+    audioBytes: 42_000,
+    transcriptBytes: 1_500,
+    summaryBytes: 0,
+    diagnosticsBytes: 500,
+    totalBytes: 44_000,
+  });
   assert.equal(item.paths.rootDir, "/tmp/session-1");
   assert.equal(item.audioSizeBytes, 42_000);
+  assert.equal(item.storageBytes, 44_000);
   assert.equal(item.healthBadge, "failed");
   assert.equal(item.failureSummary, "Summary provider returned an empty result.");
   assert.equal(item.artifactAvailability.hasTranscript, true);
@@ -108,10 +121,54 @@ test("deriveSessionListItem labels multi-input sessions clearly", () => {
         ],
       },
     },
-    24_000
+    {
+      audioBytes: 24_000,
+      transcriptBytes: 750,
+      summaryBytes: 300,
+      diagnosticsBytes: 120,
+      totalBytes: 25_170,
+    }
   );
 
   assert.equal(item.sourceLabel, "Microphone + 2 extra sources");
+});
+
+test("summarizeSessionListItems aggregates visible library stats", () => {
+  const first = deriveSessionListItem(manifest, {
+    audioBytes: 42_000,
+    transcriptBytes: 1_500,
+    summaryBytes: 0,
+    diagnosticsBytes: 500,
+    totalBytes: 44_000,
+  });
+  const second = deriveSessionListItem(
+    {
+      ...manifest,
+      sessionId: "session-2",
+      captureMode: "multiple-input",
+      captureSources: {
+        microphone: { deviceId: "mic-1", label: "USB Microphone" },
+        additionalSources: [{ deviceId: "loopback-1", label: "BlackHole 2ch" }],
+      },
+    },
+    {
+      audioBytes: 24_000,
+      transcriptBytes: 750,
+      summaryBytes: 300,
+      diagnosticsBytes: 120,
+      totalBytes: 25_170,
+    }
+  );
+
+  const stats = summarizeSessionListItems([first, second]);
+  assert.deepEqual(stats, {
+    sessionCount: 2,
+    audioBytes: 66_000,
+    transcriptBytes: 2_250,
+    summaryBytes: 300,
+    diagnosticsBytes: 620,
+    totalBytes: 69_170,
+  });
 });
 
 test("deriveSessionHealthBadge marks finalizing sessions as warning", () => {
@@ -138,7 +195,15 @@ test("buildDashboardSnapshot blocks start when diagnostics fail", () => {
   const snapshot = buildDashboardSnapshot({
     runtime,
     diagnosticsReport,
-    recentSessions: [deriveSessionListItem(manifest, 42_000)],
+    recentSessions: [
+      deriveSessionListItem(manifest, {
+        audioBytes: 42_000,
+        transcriptBytes: 1_500,
+        summaryBytes: 0,
+        diagnosticsBytes: 500,
+        totalBytes: 44_000,
+      }),
+    ],
     isCoreConfigured: false,
   });
 

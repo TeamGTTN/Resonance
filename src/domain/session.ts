@@ -17,6 +17,7 @@ export const SESSION_STATES = [
 
 export type SessionState = (typeof SESSION_STATES)[number];
 export type RecordingCaptureMode = "microphone" | "multiple-input";
+export type SessionCleanupAction = "audio" | "transcript" | "session";
 export const SUPPORTED_SESSION_SCHEMA_VERSION = 4 as const;
 
 export interface DiagnosticsSummary {
@@ -83,6 +84,18 @@ export interface RecordingSessionManifest {
   errors: string[];
 }
 
+export interface SessionArtifactSizeBreakdown {
+  audioBytes: number;
+  transcriptBytes: number;
+  summaryBytes: number;
+  diagnosticsBytes: number;
+  totalBytes: number;
+}
+
+export interface SessionLibraryStats extends SessionArtifactSizeBreakdown {
+  sessionCount: number;
+}
+
 export interface SessionRuntimeSnapshot {
   state: SessionState;
   sessionId?: string;
@@ -113,6 +126,8 @@ export interface SessionListItem {
   elapsedSeconds: number;
   committedSegments: number;
   audioSizeBytes: number;
+  storageBytes: number;
+  storageBreakdown: SessionArtifactSizeBreakdown;
   healthBadge: SessionHealthBadge;
   failureSummary?: string;
   diagnosticsSummary: string;

@@ -797,15 +797,74 @@
   line-height: 1.15;
 }
 
+.rxn-library-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin: 0 0 18px 0;
+}
+
+.rxn-library-stat,
+.rxn-library-bulkbar {
+  border-radius: 14px;
+  border: 1px solid rgba(110, 132, 153, 0.18);
+  background: rgba(16, 23, 33, 0.14);
+}
+
+.rxn-library-stat {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+}
+
+.rxn-library-stat-label {
+  color: var(--text-faint);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.rxn-library-stat-value {
+  color: var(--text-normal);
+  font-size: 1rem;
+}
+
+.rxn-library-bulkbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 14px;
+  margin: 0 0 18px 0;
+}
+
 .rxn-session-workspace-card {
   display: grid;
   gap: 14px;
+}
+
+.rxn-session-workspace-card.is-selected {
+  border-color: rgba(27, 140, 255, 0.3);
+  box-shadow: 0 10px 24px rgba(27, 140, 255, 0.08);
 }
 
 .rxn-session-meta-row {
   display: flex;
   flex-wrap: wrap;
   gap: 12px 20px;
+}
+
+.rxn-session-select {
+  display: flex;
+  align-items: center;
+  padding-top: 2px;
+}
+
+.rxn-session-checkbox {
+  width: 18px;
+  height: 18px;
+  margin: 0;
 }
 
 .rxn-session-meta-item {
