@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "A local-first AI Obsidian recorder with live transcription, diagnostics, and session-based notes.",
+  "description": "A local-first AI recorder with live transcription, diagnostics, and session-based notes.",
   "scripts": {
     "dev": "node ./node_modules/vite/bin/vite.js build --watch",
     "build": "node ./node_modules/vite/bin/vite.js build && node scripts/postbuild.mjs",
