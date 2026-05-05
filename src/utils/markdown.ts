@@ -18,7 +18,8 @@ export function normalizeCheckboxes(markdown: string): string {
 
       line = line.replace(
         /^(\s*)[-*]\s*\[\s*([xX ])\s*\]\s*(.*)$/,
-        (_source, indent, checked, rest) => `${indent}- [${checked.toLowerCase() === "x" ? "x" : " "}] ${rest}`
+        (_source: string, indent: string, checked: string, rest: string) =>
+          `${indent}- [${checked.toLowerCase() === "x" ? "x" : " "}] ${rest}`
       );
       out.push(line);
     }

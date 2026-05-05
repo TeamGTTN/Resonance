@@ -238,7 +238,9 @@ function walkCollect(root: string, depth: number, match: (path: string) => boole
       if (stat.isDirectory()) {
         results.push(...walkCollect(fullPath, depth - 1, match));
       }
-    } catch {}
+    } catch {
+      // Skip unreadable directories while probing likely local installs.
+    }
   }
 
   return results;

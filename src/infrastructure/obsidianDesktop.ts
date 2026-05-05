@@ -37,7 +37,7 @@ export function setElementVisibility(element: HTMLElement, visible: boolean): vo
       toggleable.show();
       return;
     }
-    element.style.removeProperty("display");
+    element.removeClass("rxn-hidden");
     return;
   }
 
@@ -45,5 +45,5 @@ export function setElementVisibility(element: HTMLElement, visible: boolean): vo
     toggleable.hide();
     return;
   }
-  element.style.setProperty("display", "none");
+  element.addClass("rxn-hidden");
 }

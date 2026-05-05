@@ -1,4 +1,4 @@
-import { App, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import { buildDashboardSnapshot, deriveSessionListItem, summarizeSessionListItems } from "../application/dashboard";
 import type { SessionController } from "../application/SessionController";
 import type { DashboardSnapshot } from "../domain/dashboard";
@@ -21,6 +21,7 @@ import {
 } from "../infrastructure/system/webAudio";
 import { formatBytes, formatDuration } from "../utils/format";
 import { uiCopy } from "./copy";
+import { ConfirmationModal } from "./modals/ConfirmationModal";
 import { TextPreviewModal } from "./modals/TextPreviewModal";
 
 export type SettingsSurfaceTab = "control-room" | "library" | "capture" | "transcription" | "summary" | "output";
@@ -131,7 +132,11 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     this.vaultAdapter = new VaultAdapter(app);
   }
 
-  async display() {
+  display(): void {
+    void this.renderDisplay();
+  }
+
+  private async renderDisplay(): Promise<void> {
     this.activeTab = preferredSettingsTab;
     if (this.activeTab === "control-room") {
       await this.refreshControlRoomData(true);
@@ -146,7 +151,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     this.renderHero(containerEl);
     this.renderTabs(containerEl);
 
-    const body = containerEl.createEl("div", { cls: "rxn-settings-surface" });
+    const body = containerEl.createDiv({ cls: "rxn-settings-surface" });
     if (this.activeTab === "control-room") {
       await this.renderControlRoomTab(body);
       return;
@@ -176,28 +181,20 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
   }
 
   private renderHero(container: HTMLElement) {
-    const hero = container.createEl("div", { cls: "rxn-card rxn-hero" });
+    const hero = container.createDiv({ cls: "rxn-card rxn-hero" });
 
-    const headerRow = hero.createEl("div");
-    headerRow.style.display = "flex";
-    headerRow.style.justifyContent = "space-between";
-    headerRow.style.alignItems = "center";
+    const headerRow = hero.createDiv({ cls: "rxn-hero-header-row" });
 
-    headerRow.createEl("h2", { text: uiCopy.appName, cls: "rxn-hero-brand" });
+    headerRow.createDiv({ text: uiCopy.appName, cls: "rxn-hero-brand" });
 
     const sponsor = headerRow.createEl("a", {
       href: "https://buymeacoffee.com/michaelgorini",
+      cls: "rxn-sponsor-link",
     });
     sponsor.target = "_blank";
-    sponsor.style.display = "flex";
-    sponsor.style.alignItems = "center";
-    sponsor.style.gap = "6px";
-    sponsor.style.fontSize = "13px";
-    sponsor.style.color = "var(--text-muted)";
-    sponsor.style.textDecoration = "none";
 
-    sponsor.createEl("span", { text: "Support Resonance" });
-    sponsor.createEl("span", { text: "🤍" });
+    sponsor.createSpan({ text: "Support Resonance" });
+    sponsor.createSpan({ text: "🤍" });
 
     hero.createEl("p", {
       text: uiCopy.settings.title,
@@ -206,7 +203,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
   }
 
   private renderTabs(container: HTMLElement) {
-    const groups = container.createEl("div", { cls: "rxn-settings-tab-groups" });
+    const groups = container.createDiv({ cls: "rxn-settings-tab-groups" });
     this.renderTabGroup(groups, "Workspace", WORKSPACE_TABS);
     this.renderTabGroup(groups, "Setup", SETUP_TABS, true);
   }
@@ -217,7 +214,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     if (tab === "library") {
       await this.refreshLibraryData();
     }
-    await this.display();
+    await this.renderDisplay();
   }
 
   private renderTabGroup(
@@ -226,11 +223,11 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     tabs: SettingsTabDefinition[],
     numbered = false
   ) {
-    const group = container.createEl("div", {
+    const group = container.createDiv({
       cls: numbered ? "rxn-settings-tab-group is-setup" : "rxn-settings-tab-group is-workspace",
     });
-    group.createEl("span", { text: title, cls: "rxn-settings-tab-group-label" });
-    const row = group.createEl("div", { cls: "rxn-settings-tabs" });
+    group.createSpan({ text: title, cls: "rxn-settings-tab-group-label" });
+    const row = group.createDiv({ cls: "rxn-settings-tabs" });
     tabs.forEach((tab, index) => {
       const button = row.createEl("button", { cls: "rxn-settings-tab" });
       if (tab.key === this.activeTab) {
@@ -281,25 +278,25 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     const actions = intro.createDiv({ cls: "rxn-action-bar" });
     this.createActionButton(actions, uiCopy.actions.refreshHealth, async () => {
       await this.refreshControlRoomData(true);
-      await this.display();
+      await this.renderDisplay();
     }, "rxn-btn-secondary");
     this.createActionButton(actions, this.isQuickTestRunning ? "Running quick test..." : uiCopy.actions.runQuickTest, async () => {
       await this.runQuickTest();
     }, "rxn-btn-secondary", this.isQuickTestRunning);
 
     const meta = intro.createDiv({ cls: "rxn-pill-row rxn-diagnostics-meta" });
-    meta.createEl("span", {
+    meta.createSpan({
       text: snapshot.health.badge === "failed" ? "Blocked" : snapshot.health.badge === "warning" ? "Needs review" : "Ready",
       cls: `rxn-status-pill is-${snapshot.health.badge}`,
     });
-    meta.createEl("span", { text: `${snapshot.health.blockingCount} blocking`, cls: "rxn-pill" });
-    meta.createEl("span", { text: `${snapshot.health.warningCount} warnings`, cls: "rxn-pill" });
-    meta.createEl("span", {
+    meta.createSpan({ text: `${snapshot.health.blockingCount} blocking`, cls: "rxn-pill" });
+    meta.createSpan({ text: `${snapshot.health.warningCount} warnings`, cls: "rxn-pill" });
+    meta.createSpan({
       text: `Quick test: ${this.isQuickTestRunning ? "running" : this.smokeMessage ? (this.smokeMessage.includes("failed") ? "failed" : "passed") : "not run"
         }`,
       cls: "rxn-pill",
     });
-    meta.createEl("span", { text: `Capture: ${snapshot.health.report?.capture ?? "web-audio"}`, cls: "rxn-pill" });
+    meta.createSpan({ text: `Capture: ${snapshot.health.report?.capture ?? "web-audio"}`, cls: "rxn-pill" });
 
     if (this.smokeMessage) {
       const smoke = intro.createDiv({ cls: `rxn-inline-note ${this.smokeMessage.includes("failed") ? "is-failed" : "is-healthy"}` });
@@ -343,7 +340,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
 
     new Setting(preferences)
       .setName("Open setup on startup")
-      .setDesc("Open Capture when Obsidian starts.")
+      .setDesc("Open capture when Obsidian starts.")
       .addToggle((toggle) =>
         toggle.setValue(settings.ui.showSetupWizardOnStartup).onChange(async (value) => {
           await this.options.saveSettings((current) => ({
@@ -355,7 +352,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
 
     new Setting(preferences)
       .setName("Open diagnostics on startup")
-      .setDesc("Open Diagnostics when Obsidian starts.")
+      .setDesc("Open diagnostics when Obsidian starts.")
       .addToggle((toggle) =>
         toggle.setValue(settings.ui.showDiagnosticsOnStartup).onChange(async (value) => {
           await this.options.saveSettings((current) => ({
@@ -367,7 +364,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
 
     preferences.createEl("p", {
       cls: "rxn-muted",
-      text: "Session logs remain available in Library under Preview diagnostics.",
+      text: "Session logs remain available in library under preview diagnostics.",
     });
   }
 
@@ -389,16 +386,16 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     });
 
     const meta = capture.createDiv({ cls: "rxn-pill-row rxn-diagnostics-meta" });
-    meta.createEl("span", {
+    meta.createSpan({
       text: `Permission: ${this.getWebPermissionLabel(deviceSnapshot.permissionState)}`,
       cls: `rxn-status-pill is-${this.getWebPermissionTone(deviceSnapshot.permissionState)}`,
     });
-    meta.createEl("span", {
+    meta.createSpan({
       text: deviceSnapshot.devices.length > 0 ? `${deviceSnapshot.devices.length} audio inputs` : "No audio inputs found",
       cls: "rxn-pill",
     });
     if (!deviceSnapshot.labelsAvailable) {
-      meta.createEl("span", {
+      meta.createSpan({
         text: "Labels improve after microphone access is granted",
         cls: "rxn-pill",
       });
@@ -416,23 +413,11 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     this.populateWebAudioInputs(micSelect, deviceSnapshot, settings.capture.microphone.deviceId, {
       defaultLabel: "System default input",
     });
-    micSelect.addEventListener("change", async () => {
-      const selected = micSelect.options[micSelect.selectedIndex];
-      await this.options.saveSettings((current) => ({
-        ...current,
-        capture: {
-          ...current.capture,
-          microphone: {
-            deviceId: selected?.value === "default" ? "" : selected?.value ?? "",
-            label: selected?.text ?? "",
-          },
-          additionalSources: current.capture.additionalSources.filter((source) => source.deviceId !== (selected?.value === "default" ? "" : selected?.value ?? "")),
-        },
-      }));
-      await this.display();
+    micSelect.addEventListener("change", () => {
+      void this.updateSelectedMicrophone(micSelect);
     });
 
-    capture.createEl("h4", { text: "Additional sources", cls: "rxn-section-title" });
+    new Setting(capture).setName("Additional sources").setHeading();
     capture.createEl("p", {
       cls: "rxn-muted",
       text:
@@ -486,7 +471,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
                   },
                 };
               });
-              await this.display();
+              await this.renderDisplay();
             })
           );
       });
@@ -506,8 +491,25 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
 
     const captureActions = capture.createDiv({ cls: "rxn-action-bar" });
     this.createActionButton(captureActions, uiCopy.actions.refreshDevices, async () => {
-      await this.display();
+      await this.renderDisplay();
     }, "rxn-btn-secondary");
+  }
+
+  private async updateSelectedMicrophone(select: HTMLSelectElement): Promise<void> {
+    const selected = select.options[select.selectedIndex];
+    const selectedDeviceId = selected?.value === "default" ? "" : selected?.value ?? "";
+    await this.options.saveSettings((current) => ({
+      ...current,
+      capture: {
+        ...current.capture,
+        microphone: {
+          deviceId: selectedDeviceId,
+          label: selected?.text ?? "",
+        },
+        additionalSources: current.capture.additionalSources.filter((source) => source.deviceId !== selectedDeviceId),
+      },
+    }));
+    await this.renderDisplay();
   }
 
   private async renderTranscriptionTab(container: HTMLElement) {
@@ -559,7 +561,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
             transcription: { ...current.transcription, whisperRepoPath: detected },
           }));
           new Notice(uiCopy.notices.whisperRepoDetected);
-          await this.display();
+          await this.renderDisplay();
         })
       );
 
@@ -590,25 +592,25 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
             },
           }));
           new Notice(uiCopy.notices.whisperDetected);
-          await this.display();
+          await this.renderDisplay();
         })
       );
 
     const selectedModelPreset = settings.transcription.modelPreset;
     const selectedModelLabel = this.getWhisperModelLabel(selectedModelPreset);
     const selectedModelFilename = this.getWhisperModelFilename(selectedModelPreset);
-    const model = container.createEl("div", { cls: "rxn-card rxn-step-section" });
-    const modelHeader = model.createEl("div", { cls: "rxn-step-section-header" });
-    modelHeader.createEl("span", { text: "Model", cls: "rxn-step-section-badge" });
-    modelHeader.createEl("h3", { text: "Whisper model" });
+    const model = container.createDiv({ cls: "rxn-card rxn-step-section" });
+    const modelHeader = model.createDiv({ cls: "rxn-step-section-header" });
+    modelHeader.createSpan({ text: "Model", cls: "rxn-step-section-badge" });
+    new Setting(modelHeader).setName("Whisper model").setHeading();
     model.createEl("p", {
-      text: "Choose a model size first. Then download that model once and point Model path to the file.",
+      text: "Choose a model size first. Then download that model once and point model path to the file.",
       cls: "rxn-muted",
     });
 
     new Setting(model)
       .setName("Model size")
-      .setDesc("This updates the download commands below and what Detect model looks for first.")
+      .setDesc("This updates the download commands below and what detect model looks for first.")
       .addDropdown((dropdown) => {
         dropdown.addOption("base", "Base");
         dropdown.addOption("small", "Small");
@@ -623,7 +625,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
               modelPreset: value as PluginSettings["transcription"]["modelPreset"],
             },
           }));
-          await this.display();
+          await this.renderDisplay();
         });
       });
 
@@ -675,7 +677,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       text: `${selectedModelFilename} is the first file Detect model will look for.`,
     });
     modelBullets.createEl("li", {
-      text: "For higher reliability, try Medium or Large if your machine can handle them.",
+      text: "For higher reliability, try medium or large if your machine can handle them.",
     });
 
     new Setting(model)
@@ -709,13 +711,13 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
             transcription: { ...currentSettings.transcription, modelPath: detected },
           }));
           new Notice(uiCopy.notices.modelDetected);
-          await this.display();
+          await this.renderDisplay();
         })
       );
 
     new Setting(transcription)
       .setName("Language / beam")
-      .setDesc("Leave Automatic unless you always record one language.")
+      .setDesc("Leave automatic unless you always record one language.")
       .addDropdown((dropdown) => {
         dropdown.addOption("auto", "Automatic");
         dropdown.addOption("it", "Italian");
@@ -804,7 +806,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
             ...current,
             summary: { ...current.summary, provider: value as PluginSettings["summary"]["provider"] },
           }));
-          await this.display();
+          await this.renderDisplay();
         });
       });
 
@@ -844,7 +846,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
         text.setValue(settings.summary[apiKeyField]).onChange(async (value) => {
           await this.options.saveSettings((current) => ({
             ...current,
-            summary: { ...current.summary, [apiKeyField]: value } as PluginSettings["summary"],
+            summary: { ...current.summary, [apiKeyField]: value },
           }));
         });
         text.inputEl.type = "password";
@@ -853,7 +855,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
         text.setValue(settings.summary[modelField]).onChange(async (value) => {
           await this.options.saveSettings((current) => ({
             ...current,
-            summary: { ...current.summary, [modelField]: value } as PluginSettings["summary"],
+            summary: { ...current.summary, [modelField]: value },
           }));
         })
       );
@@ -937,12 +939,12 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     search.value = this.libraryQuery;
     search.addEventListener("input", () => {
       this.libraryQuery = search.value.trim().toLowerCase();
-      void this.display();
+      void this.renderDisplay();
     });
 
     this.createActionButton(controls, uiCopy.actions.refresh, async () => {
       await this.refreshLibraryData();
-      await this.display();
+      await this.renderDisplay();
     }, "rxn-btn-secondary");
     this.createActionButton(controls, uiCopy.actions.openLibraryFolder, async () => {
       this.openLibraryFolder();
@@ -956,7 +958,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
 
     this.createActionButton(controls, uiCopy.actions.selectAllVisible, async () => {
       this.librarySelectedIds = new Set(items.map((item) => item.sessionId));
-      await this.display();
+      await this.renderDisplay();
     }, "rxn-btn-secondary", items.length === 0 || selectedItems.length === items.length);
 
     const statsRow = library.createDiv({ cls: "rxn-library-stats" });
@@ -1001,7 +1003,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       );
       this.createActionButton(bulkActions, uiCopy.actions.clearSelection, async () => {
         this.librarySelectedIds.clear();
-        await this.display();
+        await this.renderDisplay();
       }, "rxn-btn-secondary", bulkBusy);
     }
     if (items.length === 0) {
@@ -1027,21 +1029,21 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       });
       selectToggle.checked = isSelected;
       selectToggle.disabled = isBusy;
-      selectToggle.addEventListener("change", async () => {
+      selectToggle.addEventListener("change", () => {
         if (selectToggle.checked) {
           this.librarySelectedIds.add(item.sessionId);
         } else {
           this.librarySelectedIds.delete(item.sessionId);
         }
-        await this.display();
+        void this.renderDisplay();
       });
       const titleBlock = header.createDiv({ cls: "rxn-session-title" });
       titleBlock.createEl("strong", { text: item.scenarioLabel });
-      titleBlock.createEl("span", {
+      titleBlock.createSpan({
         text: item.failureSummary || item.diagnosticsSummary,
         cls: "rxn-muted",
       });
-      header.createEl("span", {
+      header.createSpan({
         text: item.status,
         cls: `rxn-status-pill is-${item.healthBadge}`,
       });
@@ -1055,15 +1057,15 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       this.renderSessionMeta(meta, "Last activity", new Date(item.lastActivityAt).toLocaleString());
 
       const artifactRow = card.createDiv({ cls: "rxn-pill-row" });
-      artifactRow.createEl("span", {
+      artifactRow.createSpan({
         text: item.artifactAvailability.hasAudio ? "Audio ready" : "No audio",
         cls: `rxn-pill ${item.artifactAvailability.hasAudio ? "is-ok" : ""}`,
       });
-      artifactRow.createEl("span", {
+      artifactRow.createSpan({
         text: item.artifactAvailability.hasTranscript ? "Transcript ready" : "No transcript",
         cls: `rxn-pill ${item.artifactAvailability.hasTranscript ? "is-ok" : ""}`,
       });
-      artifactRow.createEl("span", {
+      artifactRow.createSpan({
         text: item.artifactAvailability.hasSummary ? "Summary ready" : "No summary",
         cls: `rxn-pill ${item.artifactAvailability.hasSummary ? "is-ok" : ""}`,
       });
@@ -1112,7 +1114,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
         this.openAudioSessionId === item.sessionId ? uiCopy.actions.hideAudio : uiCopy.actions.playAudio,
         async () => {
           this.openAudioSessionId = this.openAudioSessionId === item.sessionId ? null : item.sessionId;
-          await this.display();
+          await this.renderDisplay();
         },
         "rxn-btn-secondary",
         isBusy || !item.artifactAvailability.hasAudio
@@ -1132,7 +1134,9 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
         try {
           const electron = requireNodeModule<{ shell?: { showItemInFolder?: (path: string) => void } }>("electron");
           electron.shell?.showItemInFolder?.(item.paths.rootDir);
-        } catch { }
+        } catch {
+          new Notice("Unable to reveal the session folder.");
+        }
       }, "rxn-btn-secondary", isBusy);
 
       const dangerMenu = this.createSessionActionMenu(menus, "Delete", true);
@@ -1155,13 +1159,13 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
 
   private renderSessionMeta(container: HTMLElement, label: string, value: string) {
     const item = container.createDiv({ cls: "rxn-session-meta-item" });
-    item.createEl("span", { text: `${label}:`, cls: "rxn-session-meta-label" });
-    item.createEl("span", { text: value, cls: "rxn-session-meta-value" });
+    item.createSpan({ text: `${label}:`, cls: "rxn-session-meta-label" });
+    item.createSpan({ text: value, cls: "rxn-session-meta-value" });
   }
 
   private renderLibraryStat(container: HTMLElement, label: string, value: string) {
     const item = container.createDiv({ cls: "rxn-library-stat" });
-    item.createEl("span", { text: label, cls: "rxn-library-stat-label" });
+    item.createSpan({ text: label, cls: "rxn-library-stat-label" });
     item.createEl("strong", { text: value, cls: "rxn-library-stat-value" });
   }
 
@@ -1193,8 +1197,10 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
 
     const skippedCount = items.length - manifests.length;
     const reclaimableBytes = this.store.getReclaimableBytesForSessions(manifests, "audio");
-    const ok = confirm(
-      `Delete saved audio for ${manifests.length} session${manifests.length === 1 ? "" : "s"}? Transcript and summary will be kept.${skippedCount > 0 ? ` ${skippedCount} selected session${skippedCount === 1 ? "" : "s"} will be skipped because they have no audio.` : ""} Estimated space to free: ${formatBytes(reclaimableBytes)}.`
+    const ok = await this.confirmDestructiveAction(
+      "Delete saved audio",
+      `Delete saved audio for ${manifests.length} session${manifests.length === 1 ? "" : "s"}? Transcript and summary will be kept.${skippedCount > 0 ? ` ${skippedCount} selected session${skippedCount === 1 ? "" : "s"} will be skipped because they have no audio.` : ""} Estimated space to free: ${formatBytes(reclaimableBytes)}.`,
+      uiCopy.actions.deleteAudio
     );
     if (!ok) return;
 
@@ -1202,7 +1208,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     this.openAudioSessionId = manifests.some((manifest) => manifest.sessionId === this.openAudioSessionId)
       ? null
       : this.openAudioSessionId;
-    await this.display();
+    await this.renderDisplay();
 
     try {
       await this.store.deleteAudioArtifactsMany(manifests);
@@ -1215,7 +1221,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       await this.refreshLibraryData();
     } finally {
       this.libraryBulkAction = null;
-      await this.display();
+      await this.renderDisplay();
     }
   }
 
@@ -1225,13 +1231,15 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
 
     const skippedCount = items.length - manifests.length;
     const reclaimableBytes = this.store.getReclaimableBytesForSessions(manifests, "transcript");
-    const ok = confirm(
-      `Delete saved transcript for ${manifests.length} session${manifests.length === 1 ? "" : "s"}? Summary will be kept if it exists.${skippedCount > 0 ? ` ${skippedCount} selected session${skippedCount === 1 ? "" : "s"} will be skipped because they have no transcript.` : ""} Estimated space to free: ${formatBytes(reclaimableBytes)}.`
+    const ok = await this.confirmDestructiveAction(
+      "Delete saved transcript",
+      `Delete saved transcript for ${manifests.length} session${manifests.length === 1 ? "" : "s"}? Summary will be kept if it exists.${skippedCount > 0 ? ` ${skippedCount} selected session${skippedCount === 1 ? "" : "s"} will be skipped because they have no transcript.` : ""} Estimated space to free: ${formatBytes(reclaimableBytes)}.`,
+      uiCopy.actions.deleteTranscript
     );
     if (!ok) return;
 
     this.libraryBulkAction = "transcript";
-    await this.display();
+    await this.renderDisplay();
 
     try {
       for (const manifest of manifests) {
@@ -1248,7 +1256,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       await this.refreshLibraryData();
     } finally {
       this.libraryBulkAction = null;
-      await this.display();
+      await this.renderDisplay();
     }
   }
 
@@ -1257,8 +1265,10 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     if (manifests.length === 0) return;
 
     const reclaimableBytes = this.store.getReclaimableBytesForSessions(manifests, "session");
-    const ok = confirm(
-      `Delete ${manifests.length} session${manifests.length === 1 ? "" : "s"} and their linked notes? Estimated space to free: ${formatBytes(reclaimableBytes)}.`
+    const ok = await this.confirmDestructiveAction(
+      "Delete sessions",
+      `Delete ${manifests.length} session${manifests.length === 1 ? "" : "s"} and their linked notes? Estimated space to free: ${formatBytes(reclaimableBytes)}.`,
+      uiCopy.actions.deleteSession
     );
     if (!ok) return;
 
@@ -1266,7 +1276,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     this.openAudioSessionId = manifests.some((manifest) => manifest.sessionId === this.openAudioSessionId)
       ? null
       : this.openAudioSessionId;
-    await this.display();
+    await this.renderDisplay();
 
     try {
       for (const manifest of manifests) {
@@ -1279,7 +1289,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       await this.refreshLibraryData();
     } finally {
       this.libraryBulkAction = null;
-      await this.display();
+      await this.renderDisplay();
     }
   }
 
@@ -1311,19 +1321,30 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     return list;
   }
 
+  private async confirmDestructiveAction(title: string, message: string, confirmText: string): Promise<boolean> {
+    return new ConfirmationModal(this.app, {
+      title,
+      message,
+      confirmText,
+      danger: true,
+    }).openAndWait();
+  }
+
   private openLibraryFolder() {
     try {
       const electron = requireNodeModule<{ shell?: { showItemInFolder?: (path: string) => void } }>("electron");
       const sessionsRoot = this.store.getSessionsRootDir();
       electron.shell?.showItemInFolder?.(sessionsRoot);
-    } catch { }
+    } catch {
+      new Notice("Unable to reveal the library folder.");
+    }
   }
 
   private createGuideSection(container: HTMLElement, options: GuideSectionOptions): HTMLElement {
-    const section = container.createEl("div", { cls: "rxn-card rxn-step-section" });
-    const header = section.createEl("div", { cls: "rxn-step-section-header" });
-    header.createEl("span", { text: options.badge, cls: "rxn-step-section-badge" });
-    header.createEl("h3", { text: options.title });
+    const section = container.createDiv({ cls: "rxn-card rxn-step-section" });
+    const header = section.createDiv({ cls: "rxn-step-section-header" });
+    header.createSpan({ text: options.badge, cls: "rxn-step-section-badge" });
+    new Setting(header).setName(options.title).setHeading();
     section.createEl("p", { text: options.intro, cls: "rxn-muted" });
     if (options.platformGuides) {
       this.renderPlatformGuide(section, options.platformGuides, Boolean(options.intro.trim()));
@@ -1343,7 +1364,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
   private async runLibraryRecovery(item: SessionListItem, action: "transcript" | "summary") {
     this.libraryBusySessionId = item.sessionId;
     this.libraryBusyAction = action;
-    await this.display();
+    await this.renderDisplay();
     try {
       if (action === "transcript") {
         await this.options.controller.regenerateTranscript(item.paths.rootDir);
@@ -1358,7 +1379,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     } finally {
       this.libraryBusySessionId = null;
       this.libraryBusyAction = null;
-      await this.display();
+      await this.renderDisplay();
     }
   }
 
@@ -1427,7 +1448,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
   private renderCodeBlock(container: HTMLElement, code: string, label?: string) {
     const block = container.createDiv({ cls: "rxn-guide-code-block" });
     if (label) {
-      block.createEl("div", { text: label, cls: "rxn-guide-code-label" });
+      block.createDiv({ text: label, cls: "rxn-guide-code-label" });
     }
     const shell = block.createDiv({ cls: "rxn-guide-code-shell" });
     const copyButton = shell.createEl("button", {
@@ -1435,19 +1456,8 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       cls: "rxn-guide-code-copy rxn-btn-secondary",
       attr: { type: "button" },
     });
-    copyButton.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(code);
-        new Notice("Command copied.");
-      } catch {
-        const textarea = document.createElement("textarea");
-        textarea.value = code;
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        textarea.remove();
-        new Notice("Command copied.");
-      }
+    copyButton.addEventListener("click", () => {
+      void this.copyText(code, "Command copied.");
     });
 
     const pre = shell.createEl("pre", { cls: "rxn-guide-code" });
@@ -1465,19 +1475,22 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
   private getDefaultGuidePlatform(platforms: GuidePlatform[]): GuidePlatform {
     let preferred: GuidePlatform = "macos";
 
-    try {
-      const processModule = requireNodeModule<{ platform?: string }>("process");
-      if (processModule.platform === "win32") {
-        preferred = "windows";
-      } else if (processModule.platform === "linux") {
-        preferred = "linux";
-      }
-    } catch {
-      const agent = typeof navigator === "undefined" ? "" : navigator.userAgent.toLowerCase();
-      preferred = agent.includes("windows") ? "windows" : agent.includes("linux") ? "linux" : "macos";
+    if (Platform.isWin) {
+      preferred = "windows";
+    } else if (Platform.isLinux) {
+      preferred = "linux";
     }
 
     return platforms.includes(preferred) ? preferred : platforms[0] ?? "macos";
+  }
+
+  private async copyText(text: string, successMessage: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text);
+      new Notice(successMessage);
+    } catch (error) {
+      new Notice(`Copy failed: ${String((error as Error)?.message ?? error)}`);
+    }
   }
 
   private getFilteredLibraryItems(): SessionListItem[] {
@@ -1500,7 +1513,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     }
     chip.addEventListener("click", () => {
       this.libraryFilter = value;
-      void this.display();
+      void this.renderDisplay();
     });
   }
 
@@ -1524,7 +1537,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
 
     this.isQuickTestRunning = true;
     this.smokeMessage = "Quick test running...";
-    await this.display();
+    await this.renderDisplay();
 
     try {
       new Notice("Quick test started. Obsidian may ask for microphone access.");
@@ -1538,7 +1551,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       await this.refreshControlRoomData(false);
     } finally {
       this.isQuickTestRunning = false;
-      await this.display();
+      await this.renderDisplay();
     }
   }
 
@@ -1560,7 +1573,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     const extension = pathModule.extname(item.paths.fullAudioPath) || ".wav";
     const blob = new Blob([bytes], { type: this.getAudioMimeType(item.paths.fullAudioPath) });
     const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
+    const anchor = activeDocument.createEl("a");
     anchor.href = url;
     anchor.download = `${item.scenarioLabel}-${item.sessionId}${extension}`;
     anchor.click();
@@ -1599,7 +1612,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     const addOption = (value: string, label: string) => {
       if (seen.has(value)) return;
       seen.add(value);
-      const option = document.createElement("option");
+      const option = activeDocument.createEl("option");
       option.value = value;
       option.text = label;
       select.appendChild(option);

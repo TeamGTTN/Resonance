@@ -8,11 +8,15 @@
     "dev": "node ./node_modules/vite/bin/vite.js build --watch",
     "build": "node ./node_modules/vite/bin/vite.js build && node scripts/postbuild.mjs",
     "clean": "node -e \"import('fs').then(fs=>{for(const dir of ['dist','.test-dist']){try{fs.rmSync(dir,{recursive:true,force:true});}catch{}}})\"",
+    "lint": "eslint manifest.json src/**/*.ts",
     "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
     "test": "node ./node_modules/typescript/bin/tsc -p tsconfig.tests.json && node -e \"import('fs').then(fs=>fs.writeFileSync('.test-dist/package.json', JSON.stringify({type:'commonjs'})))\" && node --test .test-dist/tests/**/*.test.js"
   },
   "devDependencies": {
     "@types/node": "^22.18.0",
+    "@typescript-eslint/parser": "^8.59.2",
+    "eslint": "^9.39.4",
+    "eslint-plugin-obsidianmd": "^0.2.9",
     "obsidian": "^1.8.7",
     "typescript": "^5.9.2",
     "vite": "^5.4.19"

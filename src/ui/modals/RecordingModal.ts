@@ -74,10 +74,10 @@ export class RecordingModal extends Modal {
     headline.createEl("p", { text: this.getSubheadline(snapshot, coreConfigured), cls: "rxn-muted" });
 
     const runtime = heroHeader.createDiv({ cls: "rxn-recording-runtime" });
-    runtime.createEl("span", { text: this.getStateLabel(snapshot.state), cls: `rxn-status-pill is-${this.getStateTone(snapshot.state)}` });
+    runtime.createSpan({ text: this.getStateLabel(snapshot.state), cls: `rxn-status-pill is-${this.getStateTone(snapshot.state)}` });
     runtime.createEl("strong", { text: formatDuration(snapshot.elapsedSeconds), cls: "rxn-recording-elapsed" });
     if (!canStart) {
-      runtime.createEl("span", { text: snapshot.scenarioLabel || scenario.label, cls: "rxn-muted" });
+      runtime.createSpan({ text: snapshot.scenarioLabel || scenario.label, cls: "rxn-muted" });
     }
 
     if (snapshot.lastError) {
@@ -117,12 +117,12 @@ export class RecordingModal extends Modal {
   private renderStartActions(snapshot: SessionRuntimeSnapshot, coreConfigured: boolean): void {
     const panel = this.contentEl.createDiv({ cls: "rxn-panel" });
     const meta = panel.createDiv({ cls: "rxn-pill-row" });
-    meta.createEl("span", { text: `Provider: ${this.options.getSettings().summary.provider}`, cls: "rxn-pill" });
+    meta.createSpan({ text: `Provider: ${this.options.getSettings().summary.provider}`, cls: "rxn-pill" });
 
     if (!coreConfigured) {
       const note = panel.createDiv({ cls: "rxn-inline-note is-warning" });
       note.createEl("strong", { text: "Setup incomplete" });
-      note.createEl("p", { text: "Finish Capture, Transcription, and Summary setup before starting your first recording." });
+      note.createEl("p", { text: "Finish capture, transcription, and summary setup before starting your first recording." });
     } else if (snapshot.state === "done") {
       const note = panel.createDiv({ cls: "rxn-inline-note is-healthy" });
       note.createEl("strong", { text: "Last session completed" });
@@ -138,7 +138,9 @@ export class RecordingModal extends Modal {
         this.render();
         try {
           await this.options.controller.startScenario(this.selectedScenarioKey);
-        } catch {}
+        } catch {
+          // The controller publishes the error through the plugin notice channel.
+        }
         this.actionPending = null;
         this.render();
       },
@@ -222,7 +224,7 @@ export class RecordingModal extends Modal {
 
   private renderMetric(container: HTMLElement, label: string, value: string, detail: string): void {
     const card = container.createDiv({ cls: "rxn-panel rxn-recording-metric" });
-    card.createEl("span", { text: label, cls: "rxn-eyebrow" });
+    card.createSpan({ text: label, cls: "rxn-eyebrow" });
     card.createEl("strong", { text: value });
     card.createEl("p", { text: detail, cls: "rxn-muted" });
   }

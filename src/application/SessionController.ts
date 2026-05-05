@@ -502,7 +502,9 @@ export class SessionController {
     if (!this.captureAdapter?.isRunning()) return;
     try {
       await this.captureAdapter.stop();
-    } catch {}
+    } catch {
+      // Capture shutdown is best effort when the session is already failing.
+    }
   }
 
   private resetSnapshot() {

@@ -24,7 +24,7 @@ function createTestStore(t: TestContext) {
       adapter: {
         getBasePath: () => rootDir,
       },
-      configDir: ".obsidian",
+      configDir: "custom-config",
     },
   } as any;
   const store = new SessionStore(app, "resonance-next");

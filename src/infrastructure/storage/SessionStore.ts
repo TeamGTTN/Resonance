@@ -176,13 +176,15 @@ export class SessionStore {
       try {
         if (!fs.statSync(dir).isDirectory()) continue;
         const manifestPath = path.join(dir, "session.json");
-        const raw = JSON.parse(String(fs.readFileSync(manifestPath, { encoding: "utf8" })));
+        const raw = JSON.parse(String(fs.readFileSync(manifestPath, { encoding: "utf8" }))) as unknown;
         if (!isSupportedSessionManifest(raw)) continue;
         const manifest = this.normalizeManifest(raw);
         if (manifest.status !== "idle" && manifest.status !== "preflight") {
           manifests.push(manifest);
         }
-      } catch {}
+      } catch {
+        // Ignore incomplete or corrupt session folders in the library view.
+      }
     }
 
     return manifests.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
@@ -194,7 +196,7 @@ export class SessionStore {
     try {
       const manifestPath = path.join(rootDir, "session.json");
       if (!fs.existsSync(manifestPath)) return null;
-      const raw = JSON.parse(String(fs.readFileSync(manifestPath, { encoding: "utf8" })));
+      const raw = JSON.parse(String(fs.readFileSync(manifestPath, { encoding: "utf8" }))) as unknown;
       if (!isSupportedSessionManifest(raw)) return null;
       return this.normalizeManifest(raw);
     } catch {

@@ -18,5 +18,9 @@ export function getVaultBasePath(app: App): string {
 }
 
 export function getVaultConfigDir(app: App): string {
-  return ((app.vault as unknown as { configDir?: string }).configDir ?? ".obsidian").trim() || ".obsidian";
+  const configDir = app.vault.configDir.trim();
+  if (!configDir) {
+    throw new Error("Unable to determine vault configuration directory.");
+  }
+  return configDir;
 }

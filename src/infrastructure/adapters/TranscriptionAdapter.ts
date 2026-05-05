@@ -1,6 +1,21 @@
 import type { TranscriptionSettings } from "../../domain/settings";
 import { requireNodeModule } from "../node";
 
+interface ProcessOutputStream {
+  on(event: "data", listener: (chunk: Buffer) => void): void;
+}
+
+interface ChildProcessHandle {
+  stdout?: ProcessOutputStream;
+  stderr?: ProcessOutputStream;
+  on(event: "error", listener: (error: Error) => void): void;
+  on(event: "close", listener: (code: number | null) => void): void;
+}
+
+interface ChildProcessModule {
+  spawn(command: string, args: string[], options: { cwd: string }): ChildProcessHandle;
+}
+
 export class WhisperTranscriptionAdapter {
   constructor(private readonly settings: TranscriptionSettings) {}
 
@@ -33,11 +48,15 @@ export class WhisperTranscriptionAdapter {
       if (preparedAudioPath !== audioPath) {
         try {
           fs.unlinkSync(preparedAudioPath);
-        } catch {}
+        } catch {
+          // Temporary audio cleanup is best effort.
+        }
       }
       try {
         fs.unlinkSync(outputTextPath);
-      } catch {}
+      } catch {
+        // whisper.cpp may not have created an output file.
+      }
     }
   }
 
@@ -56,7 +75,9 @@ export class WhisperTranscriptionAdapter {
     if (fs.existsSync(outputTextPath)) {
       try {
         fs.unlinkSync(outputTextPath);
-      } catch {}
+      } catch {
+        // Remove stale output when possible before invoking whisper.cpp.
+      }
     }
 
     const args = this.buildWhisperArgs(inputAudioPath, outputPrefix, relaxed);
@@ -127,7 +148,7 @@ export class WhisperTranscriptionAdapter {
     cwd: string,
     label: string
   ): Promise<{ stdout: string; stderr: string }> {
-    const { spawn } = requireNodeModule<{ spawn: Function }>("child_process");
+    const { spawn } = requireNodeModule<ChildProcessModule>("child_process");
     let stderr = "";
     let stdout = "";
 
@@ -140,7 +161,7 @@ export class WhisperTranscriptionAdapter {
         stderr += chunk.toString();
       });
       child.on("error", (error: Error) => reject(error));
-      child.on("close", (code: number) => {
+      child.on("close", (code: number | null) => {
         if (code === 0) {
           resolve();
         } else {

@@ -57,35 +57,35 @@ export default class ResonanceNextPlugin extends Plugin {
     setElementVisibility(this.statusBarEl, false);
 
     this.addCommand({
-      id: "resonance-next-open-control-room",
+      id: "open-control-room",
       name: uiCopy.actions.openRecorder,
       callback: () => {
         this.openRecorder();
       },
     });
     this.addCommand({
-      id: "resonance-next-open-diagnostics",
+      id: "open-diagnostics",
       name: uiCopy.actions.openDiagnostics,
       callback: () => {
         this.openDiagnostics();
       },
     });
     this.addCommand({
-      id: "resonance-next-quick-toggle-session",
+      id: "quick-toggle-session",
       name: "Start the last scenario or stop the active session",
-      callback: async () => {
-        await this.quickToggleSession();
+      callback: () => {
+        void this.quickToggleSession();
       },
     });
     this.addCommand({
-      id: "resonance-next-open-library",
+      id: "open-library",
       name: uiCopy.actions.openLibrary,
       callback: () => {
         this.openLibrary();
       },
     });
     this.addCommand({
-      id: "resonance-next-open-setup",
+      id: "open-setup",
       name: uiCopy.actions.openSetupGuide,
       callback: () => {
         this.openSetupGuide();
@@ -112,7 +112,7 @@ export default class ResonanceNextPlugin extends Plugin {
     });
   }
 
-  async onunload() {
+  onunload(): void {
     this.recordingModal?.close();
     this.recordingModal = null;
   }

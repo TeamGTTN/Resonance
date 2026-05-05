@@ -32,12 +32,42 @@ interface WebAudioContextConstructor {
   new (): AudioContext;
 }
 
+const AUDIO_WORKLET_PROCESSOR_NAME = "resonance-mix-processor";
+const AUDIO_WORKLET_SOURCE = `
+class ResonanceMixProcessor extends AudioWorkletProcessor {
+  process(inputs, outputs) {
+    const channels = inputs[0] || [];
+    const length = channels[0]?.length || 0;
+    if (length > 0) {
+      const mono = new Float32Array(length);
+      for (let sampleIndex = 0; sampleIndex < length; sampleIndex += 1) {
+        let sum = 0;
+        for (let channelIndex = 0; channelIndex < channels.length; channelIndex += 1) {
+          sum += channels[channelIndex]?.[sampleIndex] || 0;
+        }
+        mono[sampleIndex] = channels.length > 0 ? sum / channels.length : 0;
+      }
+      this.port.postMessage(mono, [mono.buffer]);
+    }
+
+    const output = outputs[0] || [];
+    for (const channel of output) {
+      channel.fill(0);
+    }
+    return true;
+  }
+}
+
+registerProcessor("${AUDIO_WORKLET_PROCESSOR_NAME}", ResonanceMixProcessor);
+`;
+
 export class WebCaptureAdapter {
   private context: AudioContext | null = null;
   private streams: MediaStream[] = [];
   private sourceNodes: MediaStreamAudioSourceNode[] = [];
   private gainNodes: GainNode[] = [];
-  private processor: ScriptProcessorNode | null = null;
+  private workletNode: AudioWorkletNode | null = null;
+  private workletModuleUrl: string | null = null;
   private sinkNode: GainNode | null = null;
   private mixBus: GainNode | null = null;
   private segmentBuffers: Float32Array[] = [];
@@ -56,7 +86,8 @@ export class WebCaptureAdapter {
     }
 
     const AudioContextCtor = getAudioContextConstructor();
-    if (!AudioContextCtor || !globalThis.navigator?.mediaDevices?.getUserMedia) {
+    const browserNavigator = getBrowserNavigator();
+    if (!AudioContextCtor || !browserNavigator?.mediaDevices?.getUserMedia) {
       throw new Error("Web Audio capture is not available in this runtime.");
     }
 
@@ -113,23 +144,28 @@ export class WebCaptureAdapter {
 
     try {
       this.streams = [];
-      this.streams.push(await globalThis.navigator.mediaDevices.getUserMedia(buildAudioConstraints(requestedDeviceId)));
+      this.streams.push(await browserNavigator.mediaDevices.getUserMedia(buildAudioConstraints(requestedDeviceId)));
       for (const source of resolvedAdditionalSources) {
-        this.streams.push(await globalThis.navigator.mediaDevices.getUserMedia(buildAudioConstraints(source.resolved.deviceId)));
+        this.streams.push(await browserNavigator.mediaDevices.getUserMedia(buildAudioConstraints(source.resolved.deviceId)));
       }
 
       this.context = new AudioContextCtor();
+      await this.installAudioWorklet(this.context);
       this.sampleRate = this.context.sampleRate || 48_000;
       this.segmentTargetSamples = Math.max(1, Math.floor(this.sampleRate * Math.max(1, options.segmentDurationSeconds)));
       this.fullRecordingWriter = new StreamingWavWriter(options.fullAudioPath, this.sampleRate, 1);
-      this.processor = this.context.createScriptProcessor(4096, 2, 1);
+      this.workletNode = new AudioWorkletNode(this.context, AUDIO_WORKLET_PROCESSOR_NAME, {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+      });
       this.mixBus = this.context.createGain();
       this.mixBus.gain.value = 1;
       this.sinkNode = this.context.createGain();
       this.sinkNode.gain.value = 0;
-      this.processor.onaudioprocess = (event) => {
+      this.workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
         try {
-          this.handleAudioProcess(event);
+          this.handleAudioChunk(event.data);
         } catch (error) {
           const message = String((error as Error)?.message ?? error);
           this.options?.onError?.(message);
@@ -161,8 +197,8 @@ export class WebCaptureAdapter {
         sourceLabels.push(config.label);
       }
 
-      this.mixBus.connect(this.processor);
-      this.processor.connect(this.sinkNode);
+      this.mixBus.connect(this.workletNode);
+      this.workletNode.connect(this.sinkNode);
       this.sinkNode.connect(this.context.destination);
 
       this.running = true;
@@ -182,16 +218,17 @@ export class WebCaptureAdapter {
   async stop(): Promise<void> {
     if (!this.running) return;
     this.running = false;
-    this.processor && (this.processor.onaudioprocess = null);
-    await this.flushCurrentSegment();
+    if (this.workletNode) {
+      this.workletNode.port.onmessage = null;
+    }
+    this.flushCurrentSegmentSync();
     this.fullRecordingWriter?.finalize();
     await this.dispose();
   }
 
-  private handleAudioProcess(event: AudioProcessingEvent): void {
+  private handleAudioChunk(monoSamples: Float32Array): void {
     if (!this.running || !this.options) return;
 
-    const monoSamples = extractMonoSamples(event.inputBuffer);
     if (monoSamples.length === 0) return;
     this.fullRecordingWriter?.append(monoSamples);
 
@@ -210,10 +247,6 @@ export class WebCaptureAdapter {
     }
   }
 
-  private async flushCurrentSegment(): Promise<void> {
-    this.flushCurrentSegmentSync();
-  }
-
   private flushCurrentSegmentSync(): void {
     if (!this.options || this.segmentSampleCount === 0) return;
 
@@ -226,36 +259,64 @@ export class WebCaptureAdapter {
     this.segmentSampleCount = 0;
   }
 
+  private async installAudioWorklet(context: AudioContext): Promise<void> {
+    if (!context.audioWorklet?.addModule) {
+      throw new Error("AudioWorklet is not available in this runtime.");
+    }
+    const blob = new Blob([AUDIO_WORKLET_SOURCE], { type: "application/javascript" });
+    this.workletModuleUrl = window.URL.createObjectURL(blob);
+    await context.audioWorklet.addModule(this.workletModuleUrl);
+  }
+
   private async dispose(): Promise<void> {
     try {
       this.sourceNodes.forEach((node) => node.disconnect());
-    } catch {}
+    } catch {
+      // Source nodes may already be disconnected during browser teardown.
+    }
     try {
       this.gainNodes.forEach((node) => node.disconnect());
-    } catch {}
+    } catch {
+      // Gain nodes may already be disconnected during browser teardown.
+    }
     try {
       this.mixBus?.disconnect();
-    } catch {}
+    } catch {
+      // The mix bus may already be disconnected after a failed start.
+    }
     try {
-      this.processor?.disconnect();
-    } catch {}
+      this.workletNode?.disconnect();
+      this.workletNode?.port.close();
+    } catch {
+      // Worklet teardown can race with AudioContext closure.
+    }
     try {
       this.sinkNode?.disconnect();
-    } catch {}
+    } catch {
+      // The silent sink may already be disconnected after a failed start.
+    }
     try {
       this.streams.forEach((stream) => stream.getTracks().forEach((track) => track.stop()));
-    } catch {}
+    } catch {
+      // Tracks may already be stopped by the OS or browser.
+    }
     try {
       if (this.context && this.context.state !== "closed") {
         await this.context.close();
       }
-    } catch {}
+    } catch {
+      // AudioContext closure is best effort during plugin shutdown.
+    }
+    if (this.workletModuleUrl) {
+      window.URL.revokeObjectURL(this.workletModuleUrl);
+    }
 
     this.context = null;
     this.streams = [];
     this.sourceNodes = [];
     this.gainNodes = [];
-    this.processor = null;
+    this.workletNode = null;
+    this.workletModuleUrl = null;
     this.sinkNode = null;
     this.mixBus = null;
     this.fullRecordingWriter = null;
@@ -265,28 +326,13 @@ export class WebCaptureAdapter {
 }
 
 function getAudioContextConstructor(): WebAudioContextConstructor | null {
-  const candidate = globalThis.AudioContext ?? ((globalThis as unknown as { webkitAudioContext?: WebAudioContextConstructor }).webkitAudioContext ?? null);
+  if (typeof window === "undefined") return null;
+  const candidate = window.AudioContext ?? ((window as unknown as { webkitAudioContext?: WebAudioContextConstructor }).webkitAudioContext ?? null);
   return candidate ?? null;
 }
 
-function extractMonoSamples(buffer: AudioBuffer): Float32Array {
-  const channels = Math.max(1, buffer.numberOfChannels);
-  const output = new Float32Array(buffer.length);
-
-  if (channels === 1) {
-    output.set(buffer.getChannelData(0));
-    return output;
-  }
-
-  for (let sampleIndex = 0; sampleIndex < buffer.length; sampleIndex += 1) {
-    let sum = 0;
-    for (let channelIndex = 0; channelIndex < channels; channelIndex += 1) {
-      sum += buffer.getChannelData(channelIndex)[sampleIndex] ?? 0;
-    }
-    output[sampleIndex] = sum / channels;
-  }
-
-  return output;
+function getBrowserNavigator(): Navigator | undefined {
+  return typeof window === "undefined" ? undefined : window.navigator;
 }
 
 function concatFloat32Arrays(chunks: Float32Array[], totalLength: number): Float32Array {

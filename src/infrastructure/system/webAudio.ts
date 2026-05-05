@@ -20,7 +20,7 @@ export interface WebAudioCapability {
 }
 
 export function getWebAudioCapability(): WebAudioCapability {
-  const mediaDevices = globalThis.navigator?.mediaDevices;
+  const mediaDevices = getBrowserNavigator()?.mediaDevices;
   return {
     supported: Boolean(mediaDevices),
     hasGetUserMedia: typeof mediaDevices?.getUserMedia === "function",
@@ -29,12 +29,13 @@ export function getWebAudioCapability(): WebAudioCapability {
 }
 
 export async function getMicrophonePermissionState(): Promise<WebAudioPermissionState> {
-  if (!globalThis.navigator) return "unsupported";
+  const browserNavigator = getBrowserNavigator();
+  if (!browserNavigator) return "unsupported";
 
   try {
-    const permissions = globalThis.navigator.permissions;
+    const permissions = browserNavigator.permissions;
     if (!permissions?.query) return "unknown";
-    const status = await permissions.query({ name: "microphone" as PermissionName });
+    const status = await permissions.query({ name: "microphone" });
     return status.state;
   } catch {
     return "unknown";
@@ -43,7 +44,8 @@ export async function getMicrophonePermissionState(): Promise<WebAudioPermission
 
 export async function listWebAudioInputDevices(): Promise<WebAudioDeviceSnapshot> {
   const capability = getWebAudioCapability();
-  if (!capability.hasEnumerateDevices || !globalThis.navigator?.mediaDevices) {
+  const browserNavigator = getBrowserNavigator();
+  if (!capability.hasEnumerateDevices || !browserNavigator?.mediaDevices) {
     return {
       devices: [],
       permissionState: capability.supported ? "unknown" : "unsupported",
@@ -52,7 +54,7 @@ export async function listWebAudioInputDevices(): Promise<WebAudioDeviceSnapshot
   }
 
   const permissionState = await getMicrophonePermissionState();
-  const devices = await globalThis.navigator.mediaDevices.enumerateDevices();
+  const devices = await browserNavigator.mediaDevices.enumerateDevices();
   const inputs = devices
     .filter((device) => device.kind === "audioinput")
     .map((device) => ({
@@ -86,4 +88,8 @@ export async function resolveWebAudioInputById(selectedDeviceId?: string): Promi
   if (!selectedDeviceId?.trim()) return undefined;
   const snapshot = await listWebAudioInputDevices();
   return snapshot.devices.find((device) => device.deviceId === selectedDeviceId.trim());
+}
+
+function getBrowserNavigator(): Navigator | undefined {
+  return typeof window === "undefined" ? undefined : window.navigator;
 }

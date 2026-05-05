@@ -1,4 +1,4 @@
-import type { App } from "obsidian";
+import { requestUrl, type App } from "obsidian";
 import { getProviderCapabilities } from "../../domain/providers";
 import {
   getSelectedProviderApiKey,
@@ -57,7 +57,7 @@ export class DiagnosticsService {
 
     const capability = getWebAudioCapability();
     const permissionState = await getMicrophonePermissionState();
-    const deviceSnapshot = await listWebAudioInputDevices().catch(async () => ({
+    const deviceSnapshot = await listWebAudioInputDevices().catch(() => ({
       devices: [],
       permissionState,
       labelsAvailable: false,
@@ -261,26 +261,47 @@ export class DiagnosticsService {
         if (adapter.isRunning()) {
           await adapter.stop();
         }
-      } catch {}
+      } catch {
+        // Best effort cleanup after a failed smoke test.
+      }
       try {
         fs.rmSync(tmpRoot, { recursive: true, force: true });
-      } catch {}
+      } catch {
+        // The temp directory is disposable; leave it behind if the OS keeps a handle open.
+      }
     }
   }
 
   private async checkOllamaHealth(endpoint: string): Promise<SmokeTestResult> {
     const base = endpoint.trim() || "http://localhost:11434";
+    let timeoutId: number | null = null;
     try {
-      const controller = new AbortController();
-      const timeoutId = window.setTimeout(() => controller.abort(), 3_000);
-      const response = await fetch(`${base}/api/tags`, { signal: controller.signal });
-      window.clearTimeout(timeoutId);
-      if (!response.ok) {
-        return { ok: false, detail: `Ollama endpoint returned ${response.status}.` };
+      const timeout = new Promise<SmokeTestResult>((resolve) => {
+        timeoutId = window.setTimeout(() => {
+          resolve({ ok: false, detail: "Ollama check timed out after 3 seconds." });
+        }, 3_000);
+      });
+      const request = requestUrl({
+        url: `${base}/api/tags`,
+        method: "GET",
+        throw: false,
+      }).then((response): SmokeTestResult => {
+        if (response.status >= 400) {
+          return { ok: false, detail: `Ollama endpoint returned ${response.status}.` };
+        }
+        return { ok: true, detail: `Ollama reachable at ${base}.` };
+      });
+      const result = await Promise.race([request, timeout]);
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
       }
-      return { ok: true, detail: `Ollama reachable at ${base}.` };
+      return result;
     } catch (error) {
       return { ok: false, detail: `Ollama check failed: ${String((error as Error)?.message ?? error)}` };
+    } finally {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
     }
   }
 }

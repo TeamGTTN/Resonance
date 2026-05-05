@@ -1,3 +1,4 @@
+import { requestUrl, type RequestUrlParam } from "obsidian";
 import { getProviderCapabilities, getSelectedSummaryModel, type SummaryProviderId } from "../../domain/providers";
 import type { SummarySettings } from "../../domain/settings";
 
@@ -5,6 +6,30 @@ export interface SummaryResult {
   provider: SummaryProviderId;
   model: string;
   markdown: string;
+}
+
+interface OllamaGenerateResponse {
+  response?: string;
+}
+
+interface GeminiResponse {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{ text?: string }>;
+    };
+  }>;
+}
+
+interface OpenAIResponse {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+}
+
+interface AnthropicResponse {
+  content?: Array<{ text?: string }>;
 }
 
 function isInvalidTranscript(transcript: string): boolean {
@@ -33,7 +58,7 @@ export function detectLanguageFromTranscript(transcript: string): string {
   if (/[àâäéèêëïîôöùûüÿç]/.test(text)) scores.fr += 3;
   const maxScore = Math.max(...Object.values(scores));
   if (maxScore === 0) return "en";
-  return (Object.entries(scores).find(([, value]) => value === maxScore)?.[0] ?? "en") as string;
+  return (Object.entries(scores).find(([, value]) => value === maxScore)?.[0] ?? "en");
 }
 
 function buildSystemGuard(expectedLanguage: string, transcript: string): string {
@@ -96,9 +121,10 @@ export class SummaryAdapter {
     expectedLanguage: string
   ): Promise<string> {
     const base = settings.ollamaEndpoint.trim() || "http://localhost:11434";
-    const response = await fetch(`${base}/api/generate`, {
+    const json = await requestProviderJson<OllamaGenerateResponse>("Ollama", {
+      url: `${base}/api/generate`,
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      contentType: "application/json",
       body: JSON.stringify({
         model: settings.ollamaModel || getProviderCapabilities("ollama").defaultModel,
         prompt: `${buildSystemGuard(expectedLanguage, transcript)}\n\n${prompt}\n\nTranscript:\n${transcript}`,
@@ -106,11 +132,7 @@ export class SummaryAdapter {
         options: { temperature: 0, top_p: 0.9, top_k: 40, num_predict: 2048 },
       }),
     });
-    if (!response.ok) {
-      throw new Error(`Ollama API error: ${response.status} ${await response.text().catch(() => "")}`);
-    }
-    const json = await response.json();
-    return String(json?.response ?? "").trim();
+    return String(json.response ?? "").trim();
   }
 
   private async summarizeWithGemini(
@@ -126,16 +148,13 @@ export class SummaryAdapter {
       systemInstruction: { role: "system", parts: [{ text: buildSystemGuard(expectedLanguage, transcript) }] },
       contents: [{ role: "user", parts: [{ text: `${prompt}\n\nTranscript:\n${transcript}` }] }],
     };
-    const response = await fetch(`${url}?key=${encodeURIComponent(settings.geminiApiKey)}`, {
+    const json = await requestProviderJson<GeminiResponse>("Gemini", {
+      url: `${url}?key=${encodeURIComponent(settings.geminiApiKey)}`,
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      contentType: "application/json",
       body: JSON.stringify(body),
     });
-    if (!response.ok) {
-      throw new Error(`Gemini API error: ${response.status} ${await response.text().catch(() => "")}`);
-    }
-    const json = await response.json();
-    return String(json?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part?.text ?? "").join("\n") ?? "").trim();
+    return String(json.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("\n") ?? "").trim();
   }
 
   private async summarizeWithOpenAI(
@@ -145,12 +164,13 @@ export class SummaryAdapter {
     expectedLanguage: string
   ): Promise<string> {
     if (!settings.openaiApiKey.trim()) throw new Error("OpenAI API key not configured.");
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const json = await requestProviderJson<OpenAIResponse>("OpenAI", {
+      url: "https://api.openai.com/v1/chat/completions",
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
         Authorization: `Bearer ${settings.openaiApiKey}`,
       },
+      contentType: "application/json",
       body: JSON.stringify({
         model: settings.openaiModel || getProviderCapabilities("openai").defaultModel,
         temperature: 0,
@@ -160,11 +180,7 @@ export class SummaryAdapter {
         ],
       }),
     });
-    if (!response.ok) {
-      throw new Error(`OpenAI API error: ${response.status} ${await response.text().catch(() => "")}`);
-    }
-    const json = await response.json();
-    return String(json?.choices?.[0]?.message?.content ?? "").trim();
+    return String(json.choices?.[0]?.message?.content ?? "").trim();
   }
 
   private async summarizeWithAnthropic(
@@ -174,13 +190,14 @@ export class SummaryAdapter {
     expectedLanguage: string
   ): Promise<string> {
     if (!settings.anthropicApiKey.trim()) throw new Error("Anthropic API key not configured.");
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const json = await requestProviderJson<AnthropicResponse>("Anthropic", {
+      url: "https://api.anthropic.com/v1/messages",
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
         "x-api-key": settings.anthropicApiKey,
         "anthropic-version": "2023-06-01",
       },
+      contentType: "application/json",
       body: JSON.stringify({
         model: settings.anthropicModel || getProviderCapabilities("anthropic").defaultModel,
         max_tokens: 2000,
@@ -189,10 +206,17 @@ export class SummaryAdapter {
         messages: [{ role: "user", content: `${prompt}\n\nTranscript:\n${transcript}` }],
       }),
     });
-    if (!response.ok) {
-      throw new Error(`Anthropic API error: ${response.status} ${await response.text().catch(() => "")}`);
-    }
-    const json = await response.json();
-    return String(json?.content?.map((part: { text?: string }) => part?.text ?? "").join("\n") ?? "").trim();
+    return String(json.content?.map((part) => part.text ?? "").join("\n") ?? "").trim();
   }
+}
+
+async function requestProviderJson<T>(providerLabel: string, request: RequestUrlParam): Promise<T> {
+  const response = await requestUrl({
+    ...request,
+    throw: false,
+  });
+  if (response.status >= 400) {
+    throw new Error(`${providerLabel} API error: ${response.status} ${response.text}`);
+  }
+  return response.json as T;
 }

@@ -13,6 +13,10 @@
   --rxn-success: #1f9a63;
 }
 
+.rxn-hidden {
+  display: none !important;
+}
+
 .rxn-settings,
 .rxn-modal {
   font-family: var(--rxn-font);
@@ -242,10 +246,18 @@
   padding: 24px 26px;
 }
 
+.rxn-hero-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+}
+
 .rxn-hero-brand {
   max-width: 780px;
   font-size: clamp(34px, 4vw, 52px);
   line-height: 0.98;
+  font-weight: 800;
 }
 
 .rxn-hero-subtitle {
@@ -253,6 +265,15 @@
   margin: 10px 0 0 0;
   font-size: 14px;
   line-height: 1.4;
+}
+
+.rxn-sponsor-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-decoration: none;
 }
 
 .rxn-panel h3 {

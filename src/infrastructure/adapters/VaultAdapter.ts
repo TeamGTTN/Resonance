@@ -72,7 +72,7 @@ export class VaultAdapter {
     if (!path) return;
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) return;
-    await this.app.vault.delete(file, true);
+    await this.app.fileManager.trashFile(file);
   }
 
   private async ensureFolderExists(folderPath: string): Promise<void> {
@@ -85,7 +85,9 @@ export class VaultAdapter {
       if (this.app.vault.getAbstractFileByPath(current)) continue;
       try {
         await this.app.vault.createFolder(current);
-      } catch {}
+      } catch {
+        // Another plugin or sync process may have created the folder first.
+      }
     }
   }
 

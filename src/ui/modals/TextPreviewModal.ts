@@ -6,9 +6,9 @@ export class TextPreviewModal extends Modal {
   }
 
   onOpen(): void {
+    this.setTitle(this.titleText);
     this.contentEl.empty();
     this.contentEl.addClass("rxn-modal");
-    this.contentEl.createEl("h2", { text: this.titleText });
     const toolbar = this.contentEl.createDiv({ cls: "rxn-action-bar" });
     const copy = toolbar.createEl("button", { text: "Copy all", cls: "rxn-btn-secondary" });
     copy.addEventListener("click", () => {
@@ -23,18 +23,8 @@ export class TextPreviewModal extends Modal {
     try {
       await navigator.clipboard.writeText(text);
       new Notice("Copied.");
-      return;
-    } catch {}
-
-    const textarea = document.createElement("textarea");
-    textarea.value = text;
-    textarea.setAttribute("readonly", "true");
-    textarea.style.position = "fixed";
-    textarea.style.opacity = "0";
-    document.body.appendChild(textarea);
-    textarea.select();
-    document.execCommand("copy");
-    document.body.removeChild(textarea);
-    new Notice("Copied.");
+    } catch (error) {
+      new Notice(`Copy failed: ${String((error as Error)?.message ?? error)}`);
+    }
   }
 }

@@ -25,11 +25,11 @@ test("WebCaptureAdapter writes wav segments and final recording without polling"
     onSegmentReady: (segment) => ready.push(segment),
   });
 
-  const processor = FakeAudioContext.lastProcessor;
-  assert.ok(processor, "expected the fake script processor to be created");
+  const worklet = FakeAudioWorkletNode.lastNode;
+  assert.ok(worklet, "expected the fake AudioWorklet node to be created");
 
-  processor.emit([new Float32Array([0, 0.1, 0.2, 0.3, 0.4, 0.5])]);
-  processor.emit([new Float32Array([0.6, 0.7, 0.8, 0.9, 1])]);
+  worklet.emit([new Float32Array([0, 0.1, 0.2, 0.3, 0.4, 0.5])]);
+  worklet.emit([new Float32Array([0.6, 0.7, 0.8, 0.9, 1])]);
 
   await adapter.stop();
 
@@ -164,46 +164,65 @@ function installDesktopRuntime(): void {
 
 function installFakeWebAudioEnvironment(): void {
   requestedConstraints = [];
+  FakeAudioWorkletNode.lastNode = null;
 
-  Object.defineProperty(globalThis, "navigator", {
+  const navigatorValue = {
+    mediaDevices: {
+      getUserMedia: async (constraints: MediaStreamConstraints) => {
+        requestedConstraints.push(constraints);
+        return new FakeMediaStream();
+      },
+      enumerateDevices: async () =>
+        [
+          {
+            kind: "audioinput",
+            deviceId: "default",
+            label: "System default microphone",
+            groupId: "default-group",
+          },
+          {
+            kind: "audioinput",
+            deviceId: "mic-1",
+            label: "USB Microphone",
+            groupId: "group-1",
+          },
+          {
+            kind: "audioinput",
+            deviceId: "loopback-1",
+            label: "BlackHole 2ch",
+            groupId: "group-2",
+          },
+        ] as MediaDeviceInfo[],
+    },
+    permissions: {
+      query: async () => ({ state: "prompt" }),
+    },
+  } as unknown as Navigator;
+
+  Object.defineProperty(globalThis, "window", {
     value: {
-      mediaDevices: {
-        getUserMedia: async (constraints: MediaStreamConstraints) => {
-          requestedConstraints.push(constraints);
-          return new FakeMediaStream();
-        },
-        enumerateDevices: async () =>
-          [
-            {
-              kind: "audioinput",
-              deviceId: "default",
-              label: "System default microphone",
-              groupId: "default-group",
-            },
-            {
-              kind: "audioinput",
-              deviceId: "mic-1",
-              label: "USB Microphone",
-              groupId: "group-1",
-            },
-            {
-              kind: "audioinput",
-              deviceId: "loopback-1",
-              label: "BlackHole 2ch",
-              groupId: "group-2",
-            },
-          ] as MediaDeviceInfo[],
+      require,
+      navigator: navigatorValue,
+      AudioContext: FakeAudioContext,
+      URL: {
+        createObjectURL: () => "blob:fake-worklet",
+        revokeObjectURL: () => {},
       },
-      permissions: {
-        query: async () => ({ state: "prompt" }),
-      },
+      setTimeout,
+      clearTimeout,
     },
     configurable: true,
     writable: true,
   });
 
-  Object.defineProperty(globalThis, "AudioContext", {
-    value: FakeAudioContext,
+  Object.defineProperty(globalThis, "navigator", {
+    value: navigatorValue,
+    configurable: true,
+    writable: true,
+  });
+
+  Object.defineProperty(globalThis, "AudioWorkletNode", {
+    value: FakeAudioWorkletNode,
     configurable: true,
     writable: true,
   });
@@ -233,47 +252,54 @@ class FakeGainNode {
   disconnect(): void {}
 }
 
-class FakeScriptProcessorNode {
-  onaudioprocess: ((event: AudioProcessingEvent) => void) | null = null;
+class FakeMessagePort {
+  onmessage: ((event: MessageEvent<Float32Array>) => void) | null = null;
+
+  close(): void {
+    this.onmessage = null;
+  }
+
+  emit(samples: Float32Array): void {
+    this.onmessage?.({ data: samples } as MessageEvent<Float32Array>);
+  }
+}
+
+class FakeAudioWorkletNode {
+  static lastNode: FakeAudioWorkletNode | null = null;
+
+  readonly port = new FakeMessagePort();
+
+  constructor() {
+    FakeAudioWorkletNode.lastNode = this;
+  }
 
   connect(): void {}
   disconnect(): void {}
 
   emit(channels: Float32Array[]): void {
-    const inputBuffer = new FakeAudioBuffer(channels);
-    this.onaudioprocess?.({ inputBuffer } as unknown as AudioProcessingEvent);
-  }
-}
-
-class FakeAudioBuffer {
-  readonly numberOfChannels: number;
-  readonly length: number;
-
-  constructor(private readonly channels: Float32Array[]) {
-    this.numberOfChannels = channels.length;
-    this.length = channels[0]?.length ?? 0;
-  }
-
-  getChannelData(channelIndex: number): Float32Array {
-    return this.channels[channelIndex] ?? new Float32Array(this.length);
+    const length = channels[0]?.length ?? 0;
+    const samples = new Float32Array(length);
+    for (let sampleIndex = 0; sampleIndex < length; sampleIndex += 1) {
+      let sum = 0;
+      for (const channel of channels) {
+        sum += channel[sampleIndex] ?? 0;
+      }
+      samples[sampleIndex] = channels.length > 0 ? sum / channels.length : 0;
+    }
+    this.port.emit(samples);
   }
 }
 
 class FakeAudioContext {
-  static lastProcessor: FakeScriptProcessorNode | null = null;
-
+  readonly audioWorklet = {
+    addModule: async () => {},
+  };
   readonly sampleRate = 10;
   readonly destination = {} as AudioDestinationNode;
   state: AudioContextState = "running";
 
   createMediaStreamSource(): MediaStreamAudioSourceNode {
     return new FakeSourceNode() as unknown as MediaStreamAudioSourceNode;
-  }
-
-  createScriptProcessor(): ScriptProcessorNode {
-    const processor = new FakeScriptProcessorNode();
-    FakeAudioContext.lastProcessor = processor;
-    return processor as unknown as ScriptProcessorNode;
   }
 
   createGain(): GainNode {
