@@ -153,12 +153,12 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
 
     const body = containerEl.createDiv({ cls: "rxn-settings-surface" });
     if (this.activeTab === "control-room") {
-      await this.renderControlRoomTab(body);
+      this.renderControlRoomTab(body);
       return;
     }
 
     if (this.activeTab === "library") {
-      await this.renderLibraryTab(body);
+      this.renderLibraryTab(body);
       return;
     }
 
@@ -168,16 +168,16 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     }
 
     if (this.activeTab === "transcription") {
-      await this.renderTranscriptionTab(body);
+      this.renderTranscriptionTab(body);
       return;
     }
 
     if (this.activeTab === "summary") {
-      await this.renderSummaryTab(body);
+      this.renderSummaryTab(body);
       return;
     }
 
-    await this.renderOutputTab(body);
+    this.renderOutputTab(body);
   }
 
   private renderHero(container: HTMLElement) {
@@ -267,7 +267,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     });
   }
 
-  private async renderControlRoomTab(container: HTMLElement) {
+  private renderControlRoomTab(container: HTMLElement): void {
     const snapshot = this.buildDashboardSnapshot();
     const intro = this.createGuideSection(container, {
       badge: "Workspace",
@@ -512,7 +512,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     await this.renderDisplay();
   }
 
-  private async renderTranscriptionTab(container: HTMLElement) {
+  private renderTranscriptionTab(container: HTMLElement): void {
     const settings = this.options.getSettings();
     const transcription = this.createGuideSection(container, {
       badge: "whisper.cpp",
@@ -567,9 +567,9 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
 
     new Setting(transcription)
       .setName("whisper.cpp CLI")
-      .setDesc("Path to whisper-cli.")
+      .setDesc("Path to whisper-CLI.")
       .addText((text) =>
-        text.setPlaceholder("/path/to/whisper-cli").setValue(settings.transcription.whisperCliPath).onChange(async (value) => {
+        text.setPlaceholder("/path/to/whisper-CLI").setValue(settings.transcription.whisperCliPath).onChange(async (value) => {
           await this.options.saveSettings((current) => ({
             ...current,
             transcription: { ...current.transcription, whisperCliPath: value.trim() },
@@ -770,7 +770,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       );
   }
 
-  private async renderSummaryTab(container: HTMLElement) {
+  private renderSummaryTab(container: HTMLElement): void {
     const settings = this.options.getSettings();
     const summary = this.createGuideSection(container, {
       badge: "Provider",
@@ -815,7 +815,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
         .setName("Ollama endpoint / model")
         .setDesc("Local server URL and model tag.")
         .addText((text) =>
-          text.setPlaceholder("http://localhost:11434").setValue(settings.summary.ollamaEndpoint).onChange(async (value) => {
+          text.setPlaceholder("HTTP://localhost:11434").setValue(settings.summary.ollamaEndpoint).onChange(async (value) => {
             await this.options.saveSettings((current) => ({
               ...current,
               summary: { ...current.summary, ollamaEndpoint: value.trim() },
@@ -823,7 +823,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
           })
         )
         .addText((text) =>
-          text.setPlaceholder("gemma3").setValue(settings.summary.ollamaModel).onChange(async (value) => {
+          text.setPlaceholder("Gemma3").setValue(settings.summary.ollamaModel).onChange(async (value) => {
             await this.options.saveSettings((current) => ({
               ...current,
               summary: { ...current.summary, ollamaModel: value.trim() },
@@ -861,7 +861,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       );
   }
 
-  private async renderOutputTab(container: HTMLElement) {
+  private renderOutputTab(container: HTMLElement): void {
     const settings = this.options.getSettings();
     const output = this.createGuideSection(container, {
       badge: "Vault",
@@ -919,7 +919,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
 
   }
 
-  private async renderLibraryTab(container: HTMLElement) {
+  private renderLibraryTab(container: HTMLElement): void {
     const library = this.createGuideSection(container, {
       badge: "Workspace",
       title: uiCopy.library.title,
@@ -946,7 +946,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       await this.refreshLibraryData();
       await this.renderDisplay();
     }, "rxn-btn-secondary");
-    this.createActionButton(controls, uiCopy.actions.openLibraryFolder, async () => {
+    this.createActionButton(controls, uiCopy.actions.openLibraryFolder, () => {
       this.openLibraryFolder();
     }, "rxn-btn-secondary");
 
@@ -1121,16 +1121,16 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       );
 
       const toolsMenu = this.createSessionActionMenu(menus, "Inspect");
-      this.createActionButton(toolsMenu, uiCopy.actions.previewTranscript, async () => {
+      this.createActionButton(toolsMenu, uiCopy.actions.previewTranscript, () => {
         new TextPreviewModal(this.app, "Raw transcript", this.store.readTextFile(item.paths.transcriptTextPath)).open();
       }, "rxn-btn-secondary", isBusy || !item.artifactAvailability.hasTranscript);
-      this.createActionButton(toolsMenu, uiCopy.actions.previewDiagnostics, async () => {
+      this.createActionButton(toolsMenu, uiCopy.actions.previewDiagnostics, () => {
         new TextPreviewModal(this.app, "Diagnostics log", this.store.readTextFile(item.paths.diagnosticsLogPath)).open();
       }, "rxn-btn-secondary", isBusy);
-      this.createActionButton(toolsMenu, uiCopy.actions.exportAudio, async () => {
+      this.createActionButton(toolsMenu, uiCopy.actions.exportAudio, () => {
         this.exportAudio(item);
       }, "rxn-btn-secondary", isBusy || !item.artifactAvailability.hasAudio);
-      this.createActionButton(toolsMenu, uiCopy.actions.showFolder, async () => {
+      this.createActionButton(toolsMenu, uiCopy.actions.showFolder, () => {
         try {
           const electron = requireNodeModule<{ shell?: { showItemInFolder?: (path: string) => void } }>("electron");
           electron.shell?.showItemInFolder?.(item.paths.rootDir);

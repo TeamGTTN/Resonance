@@ -148,12 +148,12 @@ export class WhisperTranscriptionAdapter {
     cwd: string,
     label: string
   ): Promise<{ stdout: string; stderr: string }> {
-    const { spawn } = requireNodeModule<ChildProcessModule>("child_process");
+    const childProcess = requireNodeModule<ChildProcessModule>("child_process");
     let stderr = "";
     let stdout = "";
 
     await new Promise<void>((resolve, reject) => {
-      const child = spawn(command, args, { cwd });
+      const child = childProcess.spawn(command, args, { cwd });
       child.stdout?.on("data", (chunk: Buffer) => {
         stdout += chunk.toString();
       });

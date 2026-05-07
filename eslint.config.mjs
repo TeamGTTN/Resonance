@@ -27,27 +27,9 @@ export default defineConfig([
       },
     },
     rules: {
-      "obsidianmd/ui/sentence-case": [
-        "warn",
-        {
-          brands: [
-            "Resonance",
-            "Obsidian",
-            "Web Audio",
-            "Ollama",
-            "OpenAI",
-            "Gemini",
-            "Anthropic",
-            "whisper.cpp",
-            "whisper-cli",
-            "/path/to/whisper-cli",
-            "gemma3",
-            "http://localhost:11434",
-          ],
-          acronyms: ["API", "CLI", "WAV", "OS", "URL", "HTTP"],
-          enforceCamelCaseLower: true,
-        },
-      ],
+      "@typescript-eslint/require-await": "error",
+      "@typescript-eslint/unbound-method": "error",
+      "obsidianmd/ui/sentence-case": "error",
     },
   },
 ]);

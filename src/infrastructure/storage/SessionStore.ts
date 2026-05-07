@@ -123,7 +123,7 @@ export class SessionStore {
     return manifest;
   }
 
-  async writeManifest(manifest: RecordingSessionManifest): Promise<void> {
+  writeManifest(manifest: RecordingSessionManifest): Promise<void> {
     const fs = requireNodeModule<FsModule>("fs");
     const now = new Date().toISOString();
     manifest.schemaVersion = SUPPORTED_SESSION_SCHEMA_VERSION;
@@ -134,41 +134,46 @@ export class SessionStore {
     }
     this.refreshArtifactFlags(fs, manifest);
     fs.writeFileSync(manifest.paths.manifestPath, JSON.stringify(manifest, null, 2), { encoding: "utf8" });
+    return Promise.resolve();
   }
 
-  async appendDiagnostics(manifest: RecordingSessionManifest, message: string): Promise<void> {
+  appendDiagnostics(manifest: RecordingSessionManifest, message: string): Promise<void> {
     const fs = requireNodeModule<FsModule>("fs");
     fs.appendFileSync(manifest.paths.diagnosticsLogPath, `[${new Date().toISOString()}] ${message}\n`, { encoding: "utf8" });
+    return Promise.resolve();
   }
 
-  async appendTranscriptChunk(manifest: RecordingSessionManifest, chunk: string): Promise<void> {
+  appendTranscriptChunk(manifest: RecordingSessionManifest, chunk: string): Promise<void> {
     const fs = requireNodeModule<FsModule>("fs");
     const current = fs.existsSync(manifest.paths.transcriptTextPath)
       ? String(fs.readFileSync(manifest.paths.transcriptTextPath, { encoding: "utf8" })).trim()
       : "";
     const prefix = current ? "\n" : "";
     fs.appendFileSync(manifest.paths.transcriptTextPath, `${prefix}${chunk.trim()}`, { encoding: "utf8" });
+    return Promise.resolve();
   }
 
   readTranscript(manifest: RecordingSessionManifest): string {
     return this.readTextFile(manifest.paths.transcriptTextPath);
   }
 
-  async writeSummary(manifest: RecordingSessionManifest, markdown: string): Promise<void> {
+  writeSummary(manifest: RecordingSessionManifest, markdown: string): Promise<void> {
     const fs = requireNodeModule<FsModule>("fs");
     fs.writeFileSync(manifest.paths.summaryMarkdownPath, markdown, { encoding: "utf8" });
+    return Promise.resolve();
   }
 
-  async writeTranscript(manifest: RecordingSessionManifest, text: string): Promise<void> {
+  writeTranscript(manifest: RecordingSessionManifest, text: string): Promise<void> {
     const fs = requireNodeModule<FsModule>("fs");
     fs.writeFileSync(manifest.paths.transcriptTextPath, text.trim(), { encoding: "utf8" });
+    return Promise.resolve();
   }
 
-  async listSessions(): Promise<RecordingSessionManifest[]> {
+  listSessions(): Promise<RecordingSessionManifest[]> {
     const fs = requireNodeModule<FsModule>("fs");
     const path = requireNodeModule<PathModule>("path");
     const root = this.getSessionsRootDir();
-    if (!fs.existsSync(root)) return [];
+    if (!fs.existsSync(root)) return Promise.resolve([]);
 
     const manifests: RecordingSessionManifest[] = [];
     for (const entry of fs.readdirSync(root)) {
@@ -187,20 +192,20 @@ export class SessionStore {
       }
     }
 
-    return manifests.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    return Promise.resolve(manifests.sort((left, right) => right.createdAt.localeCompare(left.createdAt)));
   }
 
-  async readSessionByRootDir(rootDir: string): Promise<RecordingSessionManifest | null> {
+  readSessionByRootDir(rootDir: string): Promise<RecordingSessionManifest | null> {
     const fs = requireNodeModule<FsModule>("fs");
     const path = requireNodeModule<PathModule>("path");
     try {
       const manifestPath = path.join(rootDir, "session.json");
-      if (!fs.existsSync(manifestPath)) return null;
+      if (!fs.existsSync(manifestPath)) return Promise.resolve(null);
       const raw = JSON.parse(String(fs.readFileSync(manifestPath, { encoding: "utf8" }))) as unknown;
-      if (!isSupportedSessionManifest(raw)) return null;
-      return this.normalizeManifest(raw);
+      if (!isSupportedSessionManifest(raw)) return Promise.resolve(null);
+      return Promise.resolve(this.normalizeManifest(raw));
     } catch {
-      return null;
+      return Promise.resolve(null);
     }
   }
 
@@ -223,12 +228,13 @@ export class SessionStore {
     }
   }
 
-  async deleteSessionRootDir(rootDir: string): Promise<void> {
+  deleteSessionRootDir(rootDir: string): Promise<void> {
     const fs = requireNodeModule<FsModule>("fs");
     fs.rmSync(rootDir, { recursive: true, force: true });
+    return Promise.resolve();
   }
 
-  async deleteAudioArtifacts(manifest: RecordingSessionManifest): Promise<void> {
+  deleteAudioArtifacts(manifest: RecordingSessionManifest): Promise<void> {
     const fs = requireNodeModule<FsModule>("fs");
     if (fs.existsSync(manifest.paths.fullAudioPath)) {
       fs.rmSync(manifest.paths.fullAudioPath, { recursive: false, force: true });
@@ -238,6 +244,7 @@ export class SessionStore {
       fs.mkdirSync(manifest.paths.segmentsDir, { recursive: true });
     }
     manifest.artifacts.hasAudio = false;
+    return Promise.resolve();
   }
 
   async deleteAudioArtifactsMany(manifests: RecordingSessionManifest[]): Promise<void> {
@@ -246,10 +253,11 @@ export class SessionStore {
     }
   }
 
-  async deleteTranscriptArtifacts(manifest: RecordingSessionManifest): Promise<void> {
+  deleteTranscriptArtifacts(manifest: RecordingSessionManifest): Promise<void> {
     const fs = requireNodeModule<FsModule>("fs");
     fs.writeFileSync(manifest.paths.transcriptTextPath, "", { encoding: "utf8" });
     manifest.artifacts.hasTranscript = false;
+    return Promise.resolve();
   }
 
   async deleteTranscriptArtifactsMany(manifests: RecordingSessionManifest[]): Promise<void> {
