@@ -539,7 +539,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
     });
 
     new Setting(transcription)
-      .setName("whisper.cpp repo")
+      .setName("Whisper.cpp repo")
       .setDesc("Optional. Helps auto-detect CLI and model.")
       .addText((text) =>
         text.setPlaceholder("/path/to/whisper.cpp").setValue(settings.transcription.whisperRepoPath).onChange(async (value) => {
@@ -566,7 +566,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       );
 
     new Setting(transcription)
-      .setName("whisper.cpp CLI")
+      .setName("Whisper.cpp CLI")
       .setDesc("Path to whisper-CLI.")
       .addText((text) =>
         text.setPlaceholder("/path/to/whisper-CLI").setValue(settings.transcription.whisperCliPath).onChange(async (value) => {
@@ -798,7 +798,7 @@ export class ResonanceNextSettingTab extends PluginSettingTab {
       .addDropdown((dropdown) => {
         dropdown.addOption("ollama", "Ollama (recommended)");
         dropdown.addOption("gemini", "Gemini (experimental)");
-        dropdown.addOption("openai", "OpenAI (experimental)");
+        dropdown.addOption("openai", "Open AI (experimental)");
         dropdown.addOption("anthropic", "Anthropic (experimental)");
         dropdown.setValue(settings.summary.provider);
         dropdown.onChange(async (value) => {
